@@ -3,19 +3,23 @@ import { Dropdown } from "../components/Dropdown";
 import { Card } from "../components/Card";
 import { RESOLUTIONS, presetByKey, targetDims } from "../lib/presets";
 import {
+  combineClip,
+  deleteLibraryAsset,
   ffmpegStatus,
   generateClips,
   getStorageRoot,
   isDesktop,
   listClips,
+  listLibrary,
   listSources,
   onClipProgress,
   pickAndImport,
+  pickAndImportAsset,
   reformatClip,
   type ClipProgress,
   type FfmpegStatus,
 } from "../lib/api";
-import type { Clip, ClipMode, SourceVideo } from "../types";
+import type { AssetKind, Clip, ClipMode, LibraryAsset, SourceVideo } from "../types";
 
 const PROJECT_ID = 1; // single active project for M2
 
@@ -50,6 +54,13 @@ export function Workspace({ onToggleSidebar }: Props) {
   const [formatting, setFormatting] = useState<Set<number>>(new Set());
   const [outputs, setOutputs] = useState<Record<number, string>>({});
 
+  const [openers, setOpeners] = useState<LibraryAsset[]>([]);
+  const [endings, setEndings] = useState<LibraryAsset[]>([]);
+  const [openerId, setOpenerId] = useState<number | null>(null);
+  const [endingId, setEndingId] = useState<number | null>(null);
+  const [combining, setCombining] = useState<Set<number>>(new Set());
+  const [finals, setFinals] = useState<Record<number, string>>({});
+
   const dims = useMemo(() => targetDims(preset, res), [preset, res]);
 
   useEffect(() => {
@@ -57,6 +68,7 @@ export function Workspace({ onToggleSidebar }: Props) {
     ffmpegStatus().then(setFf).catch(() => setFf(null));
     listSources(PROJECT_ID).then((s) => setSource(s[0] ?? null)).catch(() => {});
     listClips(PROJECT_ID).then(setClips).catch(() => {});
+    refreshLibrary();
     const un = onClipProgress(setProgress);
     return () => {
       un.then((f) => f());
@@ -99,6 +111,59 @@ export function Workspace({ onToggleSidebar }: Props) {
       setError(String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function refreshLibrary() {
+    listLibrary("opener").then(setOpeners).catch(() => {});
+    listLibrary("ending").then(setEndings).catch(() => {});
+  }
+
+  async function handleImportAsset(kind: AssetKind) {
+    setError(null);
+    try {
+      const a = await pickAndImportAsset(kind);
+      if (a) {
+        await refreshLibrary();
+        if (kind === "opener") setOpenerId(a.id);
+        else setEndingId(a.id);
+      }
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleDeleteAsset(kind: AssetKind, id: number) {
+    try {
+      await deleteLibraryAsset(id);
+      if (kind === "opener" && openerId === id) setOpenerId(null);
+      if (kind === "ending" && endingId === id) setEndingId(null);
+      await refreshLibrary();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleCombine(clipIds: number[]) {
+    if (clipIds.length === 0) {
+      setError("Generate clips first.");
+      return;
+    }
+    setError(null);
+    setCombining((s) => new Set([...s, ...clipIds]));
+    try {
+      for (const id of clipIds) {
+        const out = await combineClip({ clipId: id, openerId, endingId, width: dims.w, height: dims.h });
+        setFinals((f) => ({ ...f, [id]: out }));
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setCombining((s) => {
+        const n = new Set(s);
+        clipIds.forEach((id) => n.delete(id));
+        return n;
+      });
     }
   }
 
@@ -296,13 +361,35 @@ export function Workspace({ onToggleSidebar }: Props) {
           </button>
         </Card>
 
-        {/* 4 — Combine (M4) */}
+        {/* 4 — Combine */}
         <Card step="④ Combine" title="Opener + ending" index={3}>
-          <p>Optional per project. Pick templates from the Library. (M4)</p>
-          <div className="chips">
-            <span className="chip">Opener: none</span>
-            <span className="chip">Ending: none</span>
-          </div>
+          <p>Optional. Prepend an opener and append an ending, normalized to {dims.w}×{dims.h}.</p>
+
+          <AssetPicker
+            label="Opener"
+            assets={openers}
+            selected={openerId}
+            onSelect={setOpenerId}
+            onImport={() => handleImportAsset("opener")}
+            onDelete={(id) => handleDeleteAsset("opener", id)}
+          />
+          <AssetPicker
+            label="Ending"
+            assets={endings}
+            selected={endingId}
+            onSelect={setEndingId}
+            onImport={() => handleImportAsset("ending")}
+            onDelete={(id) => handleDeleteAsset("ending", id)}
+          />
+
+          <button
+            className="btn"
+            style={{ marginTop: 14 }}
+            disabled={clips.length === 0 || (!!ff && !ff.found) || combining.size > 0}
+            onClick={() => handleCombine(clips.map((c) => c.id))}
+          >
+            {combining.size > 0 ? `Combining ${combining.size}…` : `Combine all ${clips.length} →`}
+          </button>
         </Card>
 
         {/* 5 — Export (M5) */}
@@ -312,8 +399,8 @@ export function Workspace({ onToggleSidebar }: Props) {
             export with combine (opener + ending) arrives in M5.
           </p>
           <div className="meta">
-            <span>✓ {Object.keys(outputs).length} exported</span>
-            <span>◷ {clips.length - Object.keys(outputs).length} pending</span>
+            <span>✂ {Object.keys(outputs).length} reformatted</span>
+            <span>▣ {Object.keys(finals).length} combined</span>
           </div>
         </Card>
       </div>
@@ -326,7 +413,10 @@ export function Workspace({ onToggleSidebar }: Props) {
         <div className="clip-grid">
           {clips.map((c) => {
             const isFormatting = formatting.has(c.id);
+            const isCombining = combining.has(c.id);
             const out = outputs[c.id];
+            const fin = finals[c.id];
+            const disabled = !!ff && !ff.found;
             return (
               <div className="clip" key={c.id}>
                 <div className="clip-thumb">▶</div>
@@ -335,21 +425,70 @@ export function Workspace({ onToggleSidebar }: Props) {
                   <small>
                     {fmt(c.start_sec)}–{fmt(c.end_sec)} · {fmt(c.end_sec - c.start_sec)} · {c.mode}
                   </small>
-                  {out && <small className="ok">✓ {out.split(/[\\/]/).pop()}</small>}
+                  {out && <small className="ok">✂ {out.split(/[\\/]/).pop()}</small>}
+                  {fin && <small className="ok">▣ {fin.split(/[\\/]/).pop()}</small>}
                 </div>
-                <button
-                  className="mini format"
-                  title={`Reformat to ${dims.w}×${dims.h}`}
-                  disabled={isFormatting || (!!ff && !ff.found)}
-                  onClick={() => handleReformat([c.id])}
-                >
-                  {isFormatting ? "…" : out ? "↻" : "⤓"}
-                </button>
+                <div className="clip-actions">
+                  <button
+                    className="mini format"
+                    title={`Reformat to ${dims.w}×${dims.h}`}
+                    disabled={isFormatting || disabled}
+                    onClick={() => handleReformat([c.id])}
+                  >
+                    {isFormatting ? "…" : "⤓"}
+                  </button>
+                  <button
+                    className="mini format"
+                    title="Combine with opener + ending"
+                    disabled={isCombining || disabled}
+                    onClick={() => handleCombine([c.id])}
+                  >
+                    {isCombining ? "…" : "▣"}
+                  </button>
+                </div>
               </div>
             );
           })}
         </div>
       )}
     </section>
+  );
+}
+
+interface AssetPickerProps {
+  label: string;
+  assets: LibraryAsset[];
+  selected: number | null;
+  onSelect: (id: number | null) => void;
+  onImport: () => void;
+  onDelete: (id: number) => void;
+}
+
+function AssetPicker({ label, assets, selected, onSelect, onImport, onDelete }: AssetPickerProps) {
+  return (
+    <div className="picker">
+      <div className="picker-head">
+        <span>{label}</span>
+        <button className="mini format" title={`Import ${label.toLowerCase()}`} onClick={onImport}>
+          ＋
+        </button>
+      </div>
+      <div className="chips">
+        <span className={"chip" + (selected === null ? " on" : "")} onClick={() => onSelect(null)}>
+          None
+        </span>
+        {assets.map((a) => (
+          <span
+            key={a.id}
+            className={"chip" + (selected === a.id ? " on" : "")}
+            onClick={() => onSelect(a.id)}
+            onDoubleClick={() => onDelete(a.id)}
+            title={`${a.name} — double-click to remove`}
+          >
+            {a.name}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }

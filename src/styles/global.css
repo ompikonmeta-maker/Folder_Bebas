@@ -188,6 +188,12 @@ input[type="number"] { font: inherit; padding: 9px 12px; border-radius: var(--r-
 .clip small.ok { color: var(--good); font-weight: 600; }
 .mini.format { background: color-mix(in srgb, var(--primary) 14%, var(--card)); color: var(--primary); font-size: 16px; }
 .mini.format:hover { background: color-mix(in srgb, var(--primary) 24%, var(--card)); color: var(--primary); }
+.clip-actions { display: flex; gap: 6px; flex: none; }
+
+/* Library asset picker */
+.picker { margin-top: 12px; }
+.picker-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-faint); margin-bottom: 6px; }
+.picker .chips { margin-top: 0; }
 
 button:disabled { opacity: .5; cursor: not-allowed; }
 

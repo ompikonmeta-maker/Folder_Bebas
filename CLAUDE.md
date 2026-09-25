@@ -45,8 +45,11 @@ Two halves talk over Tauri's `invoke` bridge:
   `db.rs` owns the schema (idempotent migrate on every launch) and queries.
   `ffmpeg.rs` locates the binaries and runs probe/cut. `commands.rs` exposes
   commands; register new ones in BOTH `commands.rs` and the `generate_handler!`
-  list in `lib.rs`. Long ffmpeg work emits a `clip_progress` event; the frontend
-  subscribes via `onClipProgress` in `lib/api.ts`.
+  list in `lib.rs`. Long ffmpeg work emits progress events (`clip_progress`,
+  `reformat_progress`, `combine_progress`); the frontend subscribes via the
+  matching `on*Progress` helpers in `lib/api.ts`. Combine normalizes each part
+  (opener/clip/ending) to a common shape — synthesizing silent audio when a
+  part has none — then concatenates with stream copy.
 
 ## Conventions
 

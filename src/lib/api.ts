@@ -1,7 +1,7 @@
 // Thin wrapper over Tauri commands (src-tauri/src/commands.rs).
 // Falls back to mock data when running in a plain browser (vite dev without Tauri),
 // so the UI is previewable without the Rust backend.
-import type { Clip, ClipMode, Project, SourceVideo } from "../types";
+import type { AssetKind, Clip, ClipMode, LibraryAsset, Project, SourceVideo } from "../types";
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -166,6 +166,79 @@ export async function onReformatProgress(cb: (p: ReformatProgress) => void): Pro
   if (!isDesktop()) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
   return listen<ReformatProgress>("reformat_progress", (e) => cb(e.payload));
+}
+
+// ---- Library (opener / ending) ----
+
+let mockLibrary: LibraryAsset[] = [];
+
+export async function listLibrary(kind: AssetKind): Promise<LibraryAsset[]> {
+  const invoke = await getInvoke();
+  if (!invoke) return mockLibrary.filter((a) => a.kind === kind);
+  return invoke<LibraryAsset[]>("list_library", { kind });
+}
+
+export async function pickAndImportAsset(kind: AssetKind): Promise<LibraryAsset | null> {
+  if (!isDesktop()) {
+    const a: LibraryAsset = {
+      id: Math.floor(Math.random() * 1e6),
+      kind,
+      name: `${kind}_sample.mp4`,
+      file_path: `(preview)/library/${kind}/${kind}_sample.mp4`,
+      created_at: new Date().toISOString(),
+    };
+    mockLibrary = [a, ...mockLibrary];
+    return a;
+  }
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: "Video", extensions: ["mp4", "mov", "mkv", "avi", "webm", "m4v"] }],
+  });
+  if (!selected || Array.isArray(selected)) return null;
+  const invoke = (await getInvoke())!;
+  return invoke<LibraryAsset>("import_library_asset", { kind, srcPath: selected });
+}
+
+export async function deleteLibraryAsset(id: number): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    mockLibrary = mockLibrary.filter((a) => a.id !== id);
+    return;
+  }
+  return invoke<void>("delete_library_asset", { id });
+}
+
+// ---- Combine ----
+
+export async function combineClip(args: {
+  clipId: number;
+  openerId?: number | null;
+  endingId?: number | null;
+  width: number;
+  height: number;
+}): Promise<string> {
+  const invoke = await getInvoke();
+  if (!invoke) return `(preview)/export_final_${args.width}x${args.height}.mp4`;
+  return invoke<string>("combine_clip", {
+    clipId: args.clipId,
+    openerId: args.openerId ?? null,
+    endingId: args.endingId ?? null,
+    width: args.width,
+    height: args.height,
+  });
+}
+
+export interface CombineProgress {
+  stage: "normalize" | "concat" | "done";
+  clip_id: number;
+  output: string | null;
+}
+
+export async function onCombineProgress(cb: (p: CombineProgress) => void): Promise<() => void> {
+  if (!isDesktop()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<CombineProgress>("combine_progress", (e) => cb(e.payload));
 }
 
 export interface ClipProgress {

@@ -192,6 +192,89 @@ pub fn reformat(input: &Path, output: &Path, w: i64, h: i64) -> Result<(), Strin
     Ok(())
 }
 
+/// Does the file have at least one audio stream?
+pub fn has_audio(input: &Path) -> bool {
+    Command::new(ffprobe_bin())
+        .args([
+            "-v", "quiet",
+            "-select_streams", "a",
+            "-show_entries", "stream=index",
+            "-of", "csv=p=0",
+        ])
+        .arg(input)
+        .output()
+        .map(|o| !o.stdout.is_empty())
+        .unwrap_or(false)
+}
+
+/// Normalize one part to a common shape (W×H cover-crop, `fps`, H.264/yuv420p,
+/// stereo AAC 48k). Silent audio is synthesized when the source has none, so
+/// every normalized part carries a matching audio track for a clean concat.
+pub fn normalize(input: &Path, output: &Path, w: i64, h: i64, fps: u32) -> Result<(), String> {
+    let vf = format!(
+        "scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,fps={fps}"
+    );
+    let mut cmd = Command::new(ffmpeg_bin());
+    cmd.args(["-hide_banner", "-loglevel", "error", "-y"]);
+
+    let audio = has_audio(input);
+    if audio {
+        cmd.arg("-i").arg(input);
+    } else {
+        // main input + synthesized silence
+        cmd.arg("-i").arg(input);
+        cmd.args(["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]);
+    }
+
+    cmd.args(["-vf", &vf]);
+    if !audio {
+        cmd.args(["-map", "0:v:0", "-map", "1:a:0", "-shortest"]);
+    }
+    cmd.args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"])
+        .args(["-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "128k"])
+        .arg(output);
+
+    let out = cmd.output().map_err(|e| format!("ffmpeg failed to start: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "ffmpeg normalize exited with {}: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
+}
+
+/// Concatenate already-normalized parts (identical codec params) with stream
+/// copy via the concat demuxer. `list_path` is a scratch file listing inputs.
+pub fn concat_copy(parts: &[PathBuf], list_path: &Path, output: &Path) -> Result<(), String> {
+    let mut list = String::new();
+    for p in parts {
+        // concat demuxer needs single-quotes escaped as '\''
+        let s = p.to_string_lossy().replace('\'', "'\\''");
+        list.push_str(&format!("file '{s}'\n"));
+    }
+    std::fs::write(list_path, list).map_err(|e| format!("write concat list failed: {e}"))?;
+
+    let out = Command::new(ffmpeg_bin())
+        .args(["-hide_banner", "-loglevel", "error", "-y"])
+        .args(["-f", "concat", "-safe", "0"])
+        .arg("-i")
+        .arg(list_path)
+        .args(["-c", "copy", "-movflags", "+faststart"])
+        .arg(output)
+        .output()
+        .map_err(|e| format!("ffmpeg failed to start: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "ffmpeg concat exited with {}: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
+}
+
 /// Compute equal-length [start, end] windows covering `total` seconds.
 pub fn auto_windows(total: f64, seg: f64) -> Vec<(f64, f64)> {
     let mut out = Vec::new();

@@ -48,6 +48,10 @@ pub fn run() {
             commands::list_clips,
             commands::generate_clips,
             commands::reformat_clip,
+            commands::import_library_asset,
+            commands::list_library,
+            commands::delete_library_asset,
+            commands::combine_clip,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

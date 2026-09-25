@@ -1,6 +1,6 @@
 //! Tauri commands exposed to the React frontend (see src/lib/api.ts).
 
-use crate::db::{Clip, NewClip, Project, SourceVideo};
+use crate::db::{Clip, LibraryAsset, NewClip, Project, SourceVideo};
 use crate::ffmpeg::{self, FfmpegStatus};
 use crate::AppState;
 use serde::Serialize;
@@ -207,6 +207,143 @@ pub fn reformat_clip(
     let _ = app.emit(
         "reformat_progress",
         ReformatProgress { stage: "done".into(), clip_id, output: Some(out_str.clone()) },
+    );
+    Ok(out_str)
+}
+
+// ---- Library (opener / ending) ----
+
+/// Copy a chosen file into `library/<kind>/` and record it.
+#[tauri::command]
+pub fn import_library_asset(
+    state: State<AppState>,
+    kind: String,
+    src_path: String,
+) -> Result<LibraryAsset, String> {
+    if kind != "opener" && kind != "ending" {
+        return Err(format!("invalid kind: {kind}"));
+    }
+    let src = PathBuf::from(&src_path);
+    if !src.is_file() {
+        return Err(format!("file not found: {src_path}"));
+    }
+    let file_name = src
+        .file_name()
+        .ok_or("asset has no file name")?
+        .to_string_lossy()
+        .to_string();
+
+    let dest_dir = state.storage_root.join("library").join(&kind);
+    let dest = unique_path(&dest_dir, &file_name);
+    std::fs::copy(&src, &dest).map_err(|e| format!("copy failed: {e}"))?;
+
+    let db = state.db.lock().map_err(map_err)?;
+    db.insert_library_asset(&kind, &file_name, &dest.to_string_lossy())
+        .map_err(map_err)
+}
+
+#[tauri::command]
+pub fn list_library(state: State<AppState>, kind: String) -> Result<Vec<LibraryAsset>, String> {
+    let db = state.db.lock().map_err(map_err)?;
+    db.list_library(&kind).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn delete_library_asset(state: State<AppState>, id: i64) -> Result<(), String> {
+    let db = state.db.lock().map_err(map_err)?;
+    if let Some(path) = db.delete_library_asset(id).map_err(map_err)? {
+        let _ = std::fs::remove_file(path); // best-effort; row already gone
+    }
+    Ok(())
+}
+
+// ---- Combine (opener + clip + ending) ----
+
+#[derive(Serialize, Clone)]
+struct CombineProgress {
+    stage: String, // "normalize" | "concat" | "done"
+    clip_id: i64,
+    output: Option<String>,
+}
+
+/// Build a final, upload-ready file: [opener?] + reformatted clip + [ending?],
+/// each normalized to `width`×`height`, concatenated into `exports/`.
+#[tauri::command]
+pub fn combine_clip(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    clip_id: i64,
+    opener_id: Option<i64>,
+    ending_id: Option<i64>,
+    width: i64,
+    height: i64,
+) -> Result<String, String> {
+    // Resolve all input paths up front.
+    let (clip_path, opener_path, ending_path) = {
+        let db = state.db.lock().map_err(map_err)?;
+        let clip = db.get_clip(clip_id).map_err(map_err)?;
+        let clip_path = clip.file_path.ok_or("clip has no file on disk")?;
+        let opener_path = match opener_id {
+            Some(id) => Some(db.get_library_asset(id).map_err(map_err)?.file_path),
+            None => None,
+        };
+        let ending_path = match ending_id {
+            Some(id) => Some(db.get_library_asset(id).map_err(map_err)?.file_path),
+            None => None,
+        };
+        (clip_path, opener_path, ending_path)
+    };
+
+    // Ordered parts: opener, main, ending.
+    let mut sources: Vec<PathBuf> = Vec::new();
+    if let Some(p) = opener_path {
+        sources.push(PathBuf::from(p));
+    }
+    sources.push(PathBuf::from(&clip_path));
+    if let Some(p) = ending_path {
+        sources.push(PathBuf::from(p));
+    }
+
+    let exports_dir = state.storage_root.join("exports");
+    let tmp_dir = exports_dir.join(".tmp");
+    std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("mkdir tmp failed: {e}"))?;
+
+    // Normalize each part to a matching shape.
+    let _ = app.emit(
+        "combine_progress",
+        CombineProgress { stage: "normalize".into(), clip_id, output: None },
+    );
+    let mut normalized: Vec<PathBuf> = Vec::new();
+    for (i, src) in sources.iter().enumerate() {
+        let part = tmp_dir.join(format!("c{clip_id}_part{i}.mp4"));
+        ffmpeg::normalize(src, &part, width, height, 30)?;
+        normalized.push(part);
+    }
+
+    // Concat.
+    let _ = app.emit(
+        "combine_progress",
+        CombineProgress { stage: "concat".into(), clip_id, output: None },
+    );
+    let stem = Path::new(&clip_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| format!("clip{clip_id}"));
+    let out = unique_path(&exports_dir, &format!("{stem}_final_{width}x{height}.mp4"));
+    let list = tmp_dir.join(format!("c{clip_id}_list.txt"));
+    let result = ffmpeg::concat_copy(&normalized, &list, &out);
+
+    // Clean up temp files regardless of outcome.
+    for p in &normalized {
+        let _ = std::fs::remove_file(p);
+    }
+    let _ = std::fs::remove_file(&list);
+    result?;
+
+    let out_str = out.to_string_lossy().to_string();
+    let _ = app.emit(
+        "combine_progress",
+        CombineProgress { stage: "done".into(), clip_id, output: Some(out_str.clone()) },
     );
     Ok(out_str)
 }

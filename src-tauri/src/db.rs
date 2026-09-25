@@ -41,6 +41,15 @@ pub struct Clip {
     pub created_at: String,
 }
 
+#[derive(Serialize)]
+pub struct LibraryAsset {
+    pub id: i64,
+    pub kind: String,
+    pub name: String,
+    pub file_path: String,
+    pub created_at: String,
+}
+
 /// A clip to create — start/end in seconds. Used by both auto and manual modes.
 pub struct NewClip {
     pub source_id: i64,
@@ -248,6 +257,62 @@ impl Db {
             end_sec: r.get(5)?,
             file_path: r.get(6)?,
             created_at: r.get(7)?,
+        })
+    }
+
+    // ---- Library assets (opener / ending) ----
+
+    pub fn insert_library_asset(
+        &self,
+        kind: &str,
+        name: &str,
+        file_path: &str,
+    ) -> rusqlite::Result<LibraryAsset> {
+        self.conn.execute(
+            "INSERT INTO library_assets (kind, name, file_path) VALUES (?1, ?2, ?3)",
+            rusqlite::params![kind, name, file_path],
+        )?;
+        self.get_library_asset(self.conn.last_insert_rowid())
+    }
+
+    pub fn get_library_asset(&self, id: i64) -> rusqlite::Result<LibraryAsset> {
+        self.conn.query_row(
+            "SELECT id, kind, name, file_path, created_at FROM library_assets WHERE id = ?1",
+            [id],
+            Self::map_asset,
+        )
+    }
+
+    pub fn list_library(&self, kind: &str) -> rusqlite::Result<Vec<LibraryAsset>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, kind, name, file_path, created_at
+             FROM library_assets WHERE kind = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map([kind], Self::map_asset)?;
+        rows.collect()
+    }
+
+    pub fn delete_library_asset(&self, id: i64) -> rusqlite::Result<Option<String>> {
+        let path: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT file_path FROM library_assets WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .ok();
+        self.conn
+            .execute("DELETE FROM library_assets WHERE id = ?1", [id])?;
+        Ok(path)
+    }
+
+    fn map_asset(r: &rusqlite::Row) -> rusqlite::Result<LibraryAsset> {
+        Ok(LibraryAsset {
+            id: r.get(0)?,
+            kind: r.get(1)?,
+            name: r.get(2)?,
+            file_path: r.get(3)?,
+            created_at: r.get(4)?,
         })
     }
 }
