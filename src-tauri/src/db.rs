@@ -216,6 +216,28 @@ impl Db {
         )
     }
 
+    pub fn rename_project(&self, id: i64, name: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE projects SET name = ?2, updated_at = datetime('now') WHERE id = ?1",
+            rusqlite::params![id, name],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a project and (via cascade) its sources, clips, and jobs.
+    pub fn delete_project(&self, id: i64) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM projects WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn touch_project(&self, id: i64) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE projects SET updated_at = datetime('now') WHERE id = ?1",
+            [id],
+        )?;
+        Ok(())
+    }
+
     // ---- Source videos ----
 
     pub fn insert_source(

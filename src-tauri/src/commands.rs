@@ -2,6 +2,7 @@
 
 use crate::db::{Clip, ExportJob, LibraryAsset, NewClip, NewJob, Project, SourceVideo};
 use crate::ffmpeg::{self, FfmpegStatus};
+use crate::storage;
 use crate::AppState;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -29,8 +30,29 @@ pub fn list_projects(state: State<AppState>) -> Result<Vec<Project>, String> {
 
 #[tauri::command]
 pub fn create_project(state: State<AppState>, name: String) -> Result<Project, String> {
+    let project = {
+        let db = state.db.lock().map_err(map_err)?;
+        db.create_project(&name).map_err(map_err)?
+    };
+    let _ = storage::ensure_project(&state.storage_root, project.id);
+    Ok(project)
+}
+
+#[tauri::command]
+pub fn rename_project(state: State<AppState>, project_id: i64, name: String) -> Result<(), String> {
     let db = state.db.lock().map_err(map_err)?;
-    db.create_project(&name).map_err(map_err)
+    db.rename_project(project_id, &name).map_err(map_err)
+}
+
+/// Delete a project: its DB rows (cascade) and its whole media subfolder.
+#[tauri::command]
+pub fn delete_project(state: State<AppState>, project_id: i64) -> Result<(), String> {
+    {
+        let db = state.db.lock().map_err(map_err)?;
+        db.delete_project(project_id).map_err(map_err)?;
+    }
+    let _ = std::fs::remove_dir_all(storage::project_dir(&state.storage_root, project_id));
+    Ok(())
 }
 
 /// Copy a chosen video into the central `sources/` folder, probe it, and record it.
@@ -50,7 +72,9 @@ pub fn import_source(
         .to_string_lossy()
         .to_string();
 
-    let dest_dir = state.storage_root.join("sources");
+    let proj = storage::ensure_project(&state.storage_root, project_id)
+        .map_err(|e| format!("mkdir project failed: {e}"))?;
+    let dest_dir = proj.join("sources");
     let dest = unique_path(&dest_dir, &file_name);
     std::fs::copy(&src, &dest).map_err(|e| format!("copy failed: {e}"))?;
 
@@ -128,7 +152,9 @@ pub fn generate_clips(
         return Err("no clips to generate".into());
     }
 
-    let clips_dir = state.storage_root.join("clips");
+    let clips_dir = storage::ensure_project(&state.storage_root, project_id)
+        .map_err(|e| format!("mkdir project failed: {e}"))?
+        .join("clips");
     let total = windows.len();
     let mut created = Vec::new();
 
@@ -184,11 +210,11 @@ pub fn reformat_clip(
     width: i64,
     height: i64,
 ) -> Result<String, String> {
-    let (input, total) = {
+    let (input, total, project_id) = {
         let db = state.db.lock().map_err(map_err)?;
         let clip = db.get_clip(clip_id).map_err(map_err)?;
         let dur = (clip.end_sec - clip.start_sec).max(0.0);
-        (clip.file_path.ok_or("clip has no file on disk")?, dur)
+        (clip.file_path.ok_or("clip has no file on disk")?, dur, clip.project_id)
     };
     let input = PathBuf::from(input);
     let stem = input
@@ -196,7 +222,8 @@ pub fn reformat_clip(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| format!("clip{clip_id}"));
 
-    let exports_dir = state.storage_root.join("exports");
+    let exports_dir = storage::project_dir(&state.storage_root, project_id).join("exports");
+    std::fs::create_dir_all(&exports_dir).ok();
     let out = unique_path(&exports_dir, &format!("{stem}_{width}x{height}.mp4"));
 
     let _ = app.emit(
@@ -280,9 +307,10 @@ pub fn combine_clip(
     height: i64,
 ) -> Result<String, String> {
     // Resolve all input paths up front.
-    let (clip_path, opener_path, ending_path) = {
+    let (clip_path, project_id, opener_path, ending_path) = {
         let db = state.db.lock().map_err(map_err)?;
         let clip = db.get_clip(clip_id).map_err(map_err)?;
+        let pid = clip.project_id;
         let clip_path = clip.file_path.ok_or("clip has no file on disk")?;
         let opener_path = match opener_id {
             Some(id) => Some(db.get_library_asset(id).map_err(map_err)?.file_path),
@@ -292,15 +320,16 @@ pub fn combine_clip(
             Some(id) => Some(db.get_library_asset(id).map_err(map_err)?.file_path),
             None => None,
         };
-        (clip_path, opener_path, ending_path)
+        (clip_path, pid, opener_path, ending_path)
     };
 
     let _ = app.emit(
         "combine_progress",
         CombineProgress { stage: "normalize".into(), clip_id, output: None },
     );
+    let proj_dir = storage::project_dir(&state.storage_root, project_id);
     let out_str = combine_parts(
-        &state.storage_root,
+        &proj_dir,
         clip_id,
         &clip_path,
         opener_path,
@@ -320,7 +349,7 @@ pub fn combine_clip(
 /// into `exports/`. Temp parts are cleaned up. Returns the output path.
 #[allow(clippy::too_many_arguments)]
 fn combine_parts(
-    storage_root: &Path,
+    proj_dir: &Path,
     clip_id: i64,
     clip_path: &str,
     opener_path: Option<String>,
@@ -338,7 +367,7 @@ fn combine_parts(
         sources.push(PathBuf::from(p));
     }
 
-    let exports_dir = storage_root.join("exports");
+    let exports_dir = proj_dir.join("exports");
     let tmp_dir = exports_dir.join(".tmp");
     std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("mkdir tmp failed: {e}"))?;
 
@@ -376,14 +405,16 @@ fn combine_parts(
 pub fn clip_thumbnail(state: State<AppState>, clip_id: i64) -> Result<String, String> {
     use base64::{engine::general_purpose::STANDARD, Engine};
 
-    let (path, dur) = {
+    let (path, dur, project_id) = {
         let db = state.db.lock().map_err(map_err)?;
         let clip = db.get_clip(clip_id).map_err(map_err)?;
         let dur = (clip.end_sec - clip.start_sec).max(0.0);
-        (clip.file_path.ok_or("clip has no file on disk")?, dur)
+        (clip.file_path.ok_or("clip has no file on disk")?, dur, clip.project_id)
     };
 
-    let thumbs = state.storage_root.join("clips").join("thumbs");
+    let thumbs = storage::project_dir(&state.storage_root, project_id)
+        .join("clips")
+        .join("thumbs");
     std::fs::create_dir_all(&thumbs).map_err(|e| format!("mkdir thumbs failed: {e}"))?;
     let out = thumbs.join(format!("clip{clip_id}.jpg"));
     ffmpeg::thumbnail(&PathBuf::from(&path), &out, dur / 2.0, 240)?;
@@ -395,12 +426,18 @@ pub fn clip_thumbnail(state: State<AppState>, clip_id: i64) -> Result<String, St
 #[tauri::command]
 pub fn delete_clip(state: State<AppState>, clip_id: i64) -> Result<(), String> {
     let db = state.db.lock().map_err(map_err)?;
+    let project_id = db.get_clip(clip_id).map(|c| c.project_id).ok();
     if let Some(path) = db.delete_clip(clip_id).map_err(map_err)? {
         let _ = std::fs::remove_file(path);
     }
-    let _ = std::fs::remove_file(
-        state.storage_root.join("clips").join("thumbs").join(format!("clip{clip_id}.jpg")),
-    );
+    if let Some(pid) = project_id {
+        let _ = std::fs::remove_file(
+            storage::project_dir(&state.storage_root, pid)
+                .join("clips")
+                .join("thumbs")
+                .join(format!("clip{clip_id}.jpg")),
+        );
+    }
     Ok(())
 }
 
@@ -417,29 +454,35 @@ pub fn delete_source(state: State<AppState>, source_id: i64) -> Result<(), Strin
     Ok(())
 }
 
-/// Reveal a file or folder in the OS file manager. Accepts a file path (opens
-/// its containing folder) or "" for the exports folder.
+/// Open a folder in the OS file manager.
+fn open_in_file_manager(dir: &Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("explorer").arg(dir).spawn();
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(dir).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let result = std::process::Command::new("xdg-open").arg(dir).spawn();
+    result.map(|_| ()).map_err(|e| format!("could not open file manager: {e}"))
+}
+
+/// Reveal a file's containing folder in the OS file manager.
 #[tauri::command]
-pub fn reveal_path(state: State<AppState>, path: String) -> Result<(), String> {
-    let target = if path.is_empty() {
-        state.storage_root.join("exports")
-    } else {
-        PathBuf::from(&path)
-    };
+pub fn reveal_path(_state: State<AppState>, path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path);
     let dir = if target.is_dir() {
         target.clone()
     } else {
         target.parent().map(|p| p.to_path_buf()).unwrap_or(target.clone())
     };
+    open_in_file_manager(&dir)
+}
 
-    #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("explorer").arg(&dir).spawn();
-    #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(&dir).spawn();
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let result = std::process::Command::new("xdg-open").arg(&dir).spawn();
-
-    result.map(|_| ()).map_err(|e| format!("could not open file manager: {e}"))
+/// Open one project's exports folder.
+#[tauri::command]
+pub fn open_project_exports(state: State<AppState>, project_id: i64) -> Result<(), String> {
+    let dir = storage::project_dir(&state.storage_root, project_id).join("exports");
+    std::fs::create_dir_all(&dir).ok();
+    open_in_file_manager(&dir)
 }
 
 // ---- Export queue ----
@@ -578,13 +621,13 @@ fn run_one_job(
         (clip_path, dur, opener, ending)
     };
 
+    let proj_dir = storage::project_dir(&state.storage_root, job.project_id);
     if job.combine && (opener_path.is_some() || ending_path.is_some()) {
-        combine_parts(
-            &state.storage_root, clip_id, &clip_path, opener_path, ending_path, width, height, on,
-        )
+        combine_parts(&proj_dir, clip_id, &clip_path, opener_path, ending_path, width, height, on)
     } else {
         // Reformat only.
-        let exports_dir = state.storage_root.join("exports");
+        let exports_dir = proj_dir.join("exports");
+        std::fs::create_dir_all(&exports_dir).ok();
         let stem = Path::new(&clip_path)
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())

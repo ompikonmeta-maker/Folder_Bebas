@@ -55,6 +55,8 @@ pub fn run() {
             commands::ffmpeg_status,
             commands::list_projects,
             commands::create_project,
+            commands::rename_project,
+            commands::delete_project,
             commands::import_source,
             commands::list_sources,
             commands::list_clips,
@@ -72,6 +74,7 @@ pub fn run() {
             commands::delete_clip,
             commands::delete_source,
             commands::reveal_path,
+            commands::open_project_exports,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

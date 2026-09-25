@@ -1,18 +1,34 @@
 import type { PlatformPreset } from "../types";
 
-// Social-media output presets. Portrait 9:16 uses center-crop; landscape 16:9 passes through.
+// Social-media output presets, grouped by aspect ratio. Baseline dims use the
+// HD short-side of 1080; targetDims() scales them per resolution.
 export const PRESETS: PlatformPreset[] = [
+  // Portrait 9:16
   { key: "yt_shorts", label: "YouTube Shorts", width: 1080, height: 1920, ratio: "9:16" },
   { key: "ig_reels", label: "Instagram Reels", width: 1080, height: 1920, ratio: "9:16" },
   { key: "tiktok", label: "TikTok", width: 1080, height: 1920, ratio: "9:16" },
-  { key: "story", label: "WA / IG Story", width: 1080, height: 1920, ratio: "9:16" },
-  { key: "yt_video", label: "YouTube Video", width: 1920, height: 1080, ratio: "16:9" },
+  { key: "fb_reels", label: "Facebook Reels", width: 1080, height: 1920, ratio: "9:16" },
+  { key: "threads", label: "Threads", width: 1080, height: 1920, ratio: "9:16" },
+  { key: "story", label: "IG / WA / FB Story", width: 1080, height: 1920, ratio: "9:16" },
+  // Square 1:1
+  { key: "ig_feed", label: "Instagram Feed", width: 1080, height: 1080, ratio: "1:1" },
+  { key: "fb_feed", label: "Facebook Feed", width: 1080, height: 1080, ratio: "1:1" },
+  // Landscape 16:9
+  { key: "youtube", label: "YouTube", width: 1920, height: 1080, ratio: "16:9" },
+  { key: "x_twitter", label: "X / Twitter", width: 1920, height: 1080, ratio: "16:9" },
+  { key: "facebook", label: "Facebook", width: 1920, height: 1080, ratio: "16:9" },
+];
+
+export const RATIOS: { ratio: string; label: string }[] = [
+  { ratio: "9:16", label: "Portrait 9:16" },
+  { ratio: "1:1", label: "Square 1:1" },
+  { ratio: "16:9", label: "Landscape 16:9" },
 ];
 
 export const RESOLUTIONS = [
-  { key: "SD", label: "SD 480p", scale: 480 },
-  { key: "HD", label: "HD 1080p", scale: 1080 },
-  { key: "UHD", label: "Ultra HD 4K", scale: 2160 },
+  { key: "SD", label: "SD", note: "480p", scale: 480 },
+  { key: "HD", label: "HD", note: "1080p", scale: 1080 },
+  { key: "UHD", label: "4K", note: "2160p", scale: 2160 },
 ] as const;
 
 export function presetByKey(key: string): PlatformPreset {

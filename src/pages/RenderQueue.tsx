@@ -3,19 +3,18 @@ import { clearFinishedJobs, isDesktop, listJobs, onJobProgress, revealPath, runQ
 import { presetByKey } from "../lib/presets";
 import type { ExportJob } from "../types";
 
-const PROJECT_ID = 1;
-
 interface Props {
+  projectId: number;
   onToggleSidebar: () => void;
 }
 
-export function RenderQueue({ onToggleSidebar }: Props) {
+export function RenderQueue({ projectId, onToggleSidebar }: Props) {
   const [jobs, setJobs] = useState<ExportJob[]>([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    listJobs(PROJECT_ID).then(setJobs).catch(() => {});
+    listJobs(projectId).then(setJobs).catch(() => {});
   }
 
   useEffect(() => {
@@ -26,13 +25,13 @@ export function RenderQueue({ onToggleSidebar }: Props) {
     return () => {
       un.then((f) => f());
     };
-  }, []);
+  }, [projectId]);
 
   async function handleRun() {
     setError(null);
     setRunning(true);
     try {
-      await runQueue(PROJECT_ID);
+      await runQueue(projectId);
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -43,7 +42,7 @@ export function RenderQueue({ onToggleSidebar }: Props) {
 
   async function handleClear() {
     try {
-      await clearFinishedJobs(PROJECT_ID);
+      await clearFinishedJobs(projectId);
       await refresh();
     } catch (e) {
       setError(String(e));

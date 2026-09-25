@@ -65,6 +65,30 @@ export async function createProject(name: string): Promise<Project> {
   return invoke<Project>("create_project", { name });
 }
 
+export async function renameProject(projectId: number, name: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    mockProjects = mockProjects.map((p) => (p.id === projectId ? { ...p, name } : p));
+    return;
+  }
+  return invoke<void>("rename_project", { projectId, name });
+}
+
+export async function deleteProject(projectId: number): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    mockProjects = mockProjects.filter((p) => p.id !== projectId);
+    return;
+  }
+  return invoke<void>("delete_project", { projectId });
+}
+
+export async function openProjectExports(projectId: number): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) return;
+  return invoke<void>("open_project_exports", { projectId });
+}
+
 export async function getStorageRoot(): Promise<string> {
   const invoke = await getInvoke();
   return invoke ? invoke<string>("get_storage_root") : "(browser preview — no central folder)";
