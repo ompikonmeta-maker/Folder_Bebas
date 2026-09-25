@@ -1,0 +1,29 @@
+{
+  "name": "cashflow",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev:server": "bun --watch server/index.ts --no-open",
+    "dev:web": "vite",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.server.json && vite build",
+    "start": "bun server/index.ts",
+    "package": "bun run build && bun scripts/package.ts"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@fontsource-variable/roboto-flex": "^5.1.0",
+    "@types/bun": "^1.1.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "material-symbols": "^0.27.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}

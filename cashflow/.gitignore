@@ -1,0 +1,8 @@
+node_modules/
+dist/
+release/
+CashFlowData/
+demo-data/
+*.db
+*.db-shm
+*.db-wal
