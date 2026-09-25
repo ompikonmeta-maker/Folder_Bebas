@@ -159,6 +159,11 @@ impl Db {
                 error           TEXT,
                 created_at      TEXT NOT NULL DEFAULT (datetime('now'))
             );
+
+            -- Seed the default project (id = 1) the UI uses, if none exists.
+            INSERT INTO projects (id, name)
+            SELECT 1, 'Untitled Project'
+            WHERE NOT EXISTS (SELECT 1 FROM projects);
             "#,
         )?;
         // Idempotent column adds for databases created before these columns
