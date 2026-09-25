@@ -35,6 +35,21 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Fetch FFmpeg (bundled as a Tauri resource)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          Write-Host "Downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_extract -Force
+          $bin = Get-ChildItem -Path ffmpeg_extract -Recurse -Filter "ffmpeg.exe" | Select-Object -First 1
+          $srcDir = $bin.DirectoryName
+          New-Item -ItemType Directory -Force -Path src-tauri/binaries | Out-Null
+          Copy-Item "$srcDir/ffmpeg.exe"  src-tauri/binaries/ffmpeg.exe  -Force
+          Copy-Item "$srcDir/ffprobe.exe" src-tauri/binaries/ffprobe.exe -Force
+          Get-Item src-tauri/binaries/*.exe | Select-Object Name, Length
+
       - name: Build Tauri app (NSIS installer + exe)
         run: npx tauri build --bundles nsis
 
@@ -45,9 +60,17 @@ jobs:
           path: src-tauri/target/release/bundle/nsis/*-setup.exe
           if-no-files-found: warn
 
-      - name: Upload portable exe
+      - name: Stage portable build (exe + ffmpeg beside it)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path portable/binaries | Out-Null
+          Copy-Item src-tauri/target/release/clipforge-studio.exe portable/ -Force
+          Copy-Item src-tauri/binaries/ffmpeg.exe  portable/binaries/ -Force
+          Copy-Item src-tauri/binaries/ffprobe.exe portable/binaries/ -Force
+
+      - name: Upload portable build (exe + bundled ffmpeg)
         uses: actions/upload-artifact@v4
         with:
           name: clipforge-studio-portable
-          path: src-tauri/target/release/clipforge-studio.exe
+          path: portable/**
           if-no-files-found: warn

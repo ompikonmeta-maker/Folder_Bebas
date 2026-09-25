@@ -32,6 +32,18 @@ pub fn run() {
             let root = storage::init_storage(&base)?;
             let db = Db::open(&storage::db_path(&root))?;
 
+            // Point ffmpeg resolution at the bundled binaries (resource_dir/binaries)
+            // when present, unless the user already set an override. This makes the
+            // packaged app self-contained — no system ffmpeg needed.
+            if std::env::var_os("CLIPFORGE_FFMPEG_DIR").is_none() {
+                if let Ok(res) = app.path().resource_dir() {
+                    let bin = res.join("binaries");
+                    if bin.is_dir() {
+                        std::env::set_var("CLIPFORGE_FFMPEG_DIR", &bin);
+                    }
+                }
+            }
+
             app.manage(AppState {
                 db: Mutex::new(db),
                 storage_root: root,

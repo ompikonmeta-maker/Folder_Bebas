@@ -6,6 +6,8 @@ dist-ssr/
 # Tauri / Rust
 src-tauri/target/
 src-tauri/gen/
+# Bundled ffmpeg binaries (fetched by CI, not committed — large + GPL)
+src-tauri/binaries/
 # App data (central storage lives outside the repo; never commit user media/db)
 *.db
 *.db-journal

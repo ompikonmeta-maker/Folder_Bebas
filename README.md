@@ -56,9 +56,12 @@ the **Actions** tab (**Run workflow**). When it finishes, download the installer
 from the run's **Artifacts** section (`clipforge-studio-installer`) and the
 standalone binary (`clipforge-studio-portable`).
 
-FFmpeg is not bundled yet — install it on the target machine (add `ffmpeg.exe`
-and `ffprobe.exe` to `PATH`, or set `CLIPFORGE_FFMPEG_DIR`). The app runs without
-it; only clipping/export are disabled until it's found.
+FFmpeg is **bundled** by the workflow: it downloads a static Windows build and
+packages `ffmpeg.exe`/`ffprobe.exe` as Tauri resources, so the installed app and
+the portable build are fully self-contained — no separate FFmpeg install needed.
+(The binaries are fetched in CI and never committed; for a local Windows build,
+drop them into `src-tauri/binaries/` first.) The resolver still honors a
+`CLIPFORGE_FFMPEG_DIR` override and falls back to `PATH`.
 
 ## Architecture
 
