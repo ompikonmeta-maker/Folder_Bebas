@@ -1,0 +1,95 @@
+/*
+ * ClipForge design tokens — MD3 Expressive, "Steel blue + peach".
+ * Change colors here only; every component reads these variables.
+ * Theme is switched by setting data-theme="light|dark" on <html>.
+ */
+:root {
+  color-scheme: light;
+
+  /* Brand */
+  --accent: #ffcfbb;          /* peach — highlights, active states, CTAs on tonal */
+  --accent-ink: #5a2a16;      /* readable text/icon on peach */
+  --primary: #34506b;         /* steel blue — primary actions */
+  --primary-ink: #ffffff;
+  --primary-hover: #2a4159;
+
+  /* Cool neutral surfaces */
+  --surface: #eceff3;         /* app background */
+  --surface-2: #dfe4ea;       /* recessed / tracks */
+  --surface-rail: #e4e8ee;    /* sidebar */
+  --canvas: #e7ebf0;          /* working canvas */
+  --card: #ffffff;
+  --line: #cdd5df;
+
+  /* Text */
+  --ink: #1a2430;
+  --ink-soft: #5b6a7a;
+  --ink-faint: #8a97a6;
+
+  /* Semantic (separate from accent) */
+  --good: #2f7d4f;
+  --warn: #b26b00;
+  --danger: #c23b3b;
+
+  /* Elevation */
+  --shadow-1: 0 1px 2px rgba(20, 35, 50, .08);
+  --shadow-2: 0 2px 6px rgba(20, 35, 50, .10), 0 12px 32px rgba(20, 35, 50, .10);
+
+  /* Shape (expressive = generous radii) */
+  --r-xl: 28px; --r-lg: 22px; --r-md: 16px; --r-sm: 12px; --r-pill: 999px;
+
+  /* Motion (expressive = springy) */
+  --spring: cubic-bezier(.2, .9, .25, 1.15);
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --dur-fast: .18s; --dur: .28s; --dur-slow: .5s;
+}
+
+:root:not([data-theme="light"]) {
+  /* system dark */
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --accent: #ffcfbb;
+    --accent-ink: #ffe6db;
+    --primary: #7fa6cc;
+    --primary-ink: #0e1720;
+    --primary-hover: #94b6d6;
+    --surface: #12181f;
+    --surface-2: #1b232c;
+    --surface-rail: #171f27;
+    --canvas: #141b23;
+    --card: #1e2731;
+    --line: #2c3743;
+    --ink: #e8edf2;
+    --ink-soft: #a7b4c1;
+    --ink-faint: #74828f;
+    --good: #7fd4a1;
+    --warn: #f0b458;
+    --danger: #f08a8a;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, .4);
+    --shadow-2: 0 2px 6px rgba(0, 0, 0, .45), 0 14px 34px rgba(0, 0, 0, .5);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --accent: #ffcfbb;
+  --accent-ink: #ffe6db;
+  --primary: #7fa6cc;
+  --primary-ink: #0e1720;
+  --primary-hover: #94b6d6;
+  --surface: #12181f;
+  --surface-2: #1b232c;
+  --surface-rail: #171f27;
+  --canvas: #141b23;
+  --card: #1e2731;
+  --line: #2c3743;
+  --ink: #e8edf2;
+  --ink-soft: #a7b4c1;
+  --ink-faint: #74828f;
+  --good: #7fd4a1;
+  --warn: #f0b458;
+  --danger: #f08a8a;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .4);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, .45), 0 14px 34px rgba(0, 0, 0, .5);
+}

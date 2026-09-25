@@ -1,0 +1,159 @@
+@import "./tokens.css";
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: "Roboto", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  transition: background var(--dur-slow) var(--ease), color var(--dur-slow) var(--ease);
+}
+h1, h2, h3 { font-family: "Roboto Flex", "Roboto", sans-serif; letter-spacing: -.02em; text-wrap: balance; }
+button { font-family: inherit; }
+img { max-width: 100%; }
+
+/* App shell */
+.app { display: grid; grid-template-columns: auto 1fr; height: 100%; }
+
+/* ---- Sidebar ---- */
+.rail {
+  background: var(--surface-rail);
+  border-right: 1px solid var(--line);
+  width: 264px;
+  display: flex; flex-direction: column;
+  padding: 20px 16px 16px;
+  gap: 6px; overflow: hidden;
+  transition: width var(--dur) var(--spring), background var(--dur-slow) var(--ease);
+}
+.app.collapsed .rail { width: 84px; }
+.brand { display: flex; align-items: center; gap: 12px; padding: 8px 8px 20px; white-space: nowrap; }
+.brand .logo {
+  width: 40px; height: 40px; flex: none; border-radius: 14px; color: #fff;
+  background: linear-gradient(140deg, var(--primary), var(--accent));
+  display: grid; place-items: center; font-weight: 800; font-family: "Roboto Flex";
+  box-shadow: var(--shadow-1);
+}
+.brand b { font-family: "Roboto Flex"; font-weight: 700; font-size: 18px; }
+.brand small { color: var(--ink-soft); font-size: 11px; display: block; }
+.app.collapsed .brand .txt { opacity: 0; }
+
+.nav { display: flex; flex-direction: column; gap: 4px; }
+.nav button {
+  display: flex; align-items: center; gap: 14px; width: 100%; text-align: left;
+  border: none; background: transparent; color: var(--ink-soft);
+  padding: 12px 14px; border-radius: var(--r-pill);
+  font-weight: 500; font-size: 14px; white-space: nowrap; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.nav button .ic { width: 24px; flex: none; text-align: center; font-size: 18px; }
+.nav button:hover { background: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--ink); }
+.nav button.active { background: color-mix(in srgb, var(--primary) 16%, var(--card)); color: var(--primary); font-weight: 700; }
+.app.collapsed .nav .lbl { opacity: 0; }
+.rail .spacer { flex: 1; }
+
+.theme-toggle {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-pill);
+  padding: 8px 10px; cursor: pointer; color: var(--ink); font-weight: 600; font-size: 13px;
+  white-space: nowrap;
+}
+.theme-toggle .knob {
+  width: 30px; height: 30px; border-radius: 50%; flex: none; background: var(--accent);
+  display: grid; place-items: center; font-size: 15px; color: var(--accent-ink);
+  transition: transform var(--dur-slow) var(--spring);
+}
+
+/* ---- Canvas ---- */
+.canvas { background: var(--canvas); padding: 22px clamp(16px, 3vw, 36px) 40px; overflow: auto; transition: background var(--dur-slow) var(--ease); }
+.topbar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+.icon-btn {
+  width: 44px; height: 44px; border-radius: 14px; flex: none; border: none; cursor: pointer;
+  background: var(--card); color: var(--ink); font-size: 20px; display: grid; place-items: center;
+  box-shadow: var(--shadow-1); transition: transform var(--dur) var(--spring);
+}
+.icon-btn:active { transform: scale(.9); }
+.title-wrap h1 { font-size: clamp(24px, 3.4vw, 32px); margin: 0; font-weight: 800; }
+.title-wrap p { margin: 2px 0 0; color: var(--ink-soft); font-size: 13px; }
+.grow { flex: 1; }
+
+/* ---- Dropdown ---- */
+.dd { position: relative; }
+.dd-trigger {
+  display: flex; align-items: center; gap: 10px; background: var(--card); color: var(--ink);
+  border: 1px solid var(--line); padding: 11px 16px; border-radius: var(--r-pill);
+  font-weight: 600; font-size: 14px; cursor: pointer; box-shadow: var(--shadow-1);
+  transition: transform var(--dur-fast) var(--spring);
+}
+.dd-trigger:active { transform: scale(.97); }
+.dd-trigger .chev { transition: transform var(--dur) var(--spring); font-size: 12px; color: var(--ink-soft); }
+.dd.open .dd-trigger .chev { transform: rotate(180deg); }
+.dd-menu {
+  position: absolute; right: 0; top: calc(100% + 10px); min-width: 240px; z-index: 30;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md);
+  box-shadow: var(--shadow-2); padding: 8px; transform-origin: top right;
+  opacity: 0; transform: scale(.9) translateY(-6px); pointer-events: none;
+  transition: opacity var(--dur-fast) var(--ease), transform var(--dur) var(--spring);
+}
+.dd.open .dd-menu { opacity: 1; transform: none; pointer-events: auto; }
+.dd-grp { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint); padding: 8px 12px 4px; }
+.dd-item { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border-radius: 12px; cursor: pointer; font-size: 14px; transition: background var(--dur-fast) var(--ease); }
+.dd-item:hover { background: color-mix(in srgb, var(--accent) 34%, transparent); }
+.dd-item .ratio { margin-left: auto; font-size: 12px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.dd-item.sel { background: color-mix(in srgb, var(--primary) 14%, var(--card)); font-weight: 700; color: var(--primary); }
+
+/* ---- Cards + directional reveal ---- */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px; align-items: start; }
+.card {
+  background: var(--card); border-radius: var(--r-xl); padding: 22px;
+  box-shadow: var(--shadow-2); border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  opacity: 0; transform: translateY(26px) scale(.98); animation: reveal .6s var(--spring) forwards;
+}
+@keyframes reveal { to { opacity: 1; transform: none; } }
+.card .step {
+  display: inline-flex; align-items: center; gap: 8px; margin-bottom: 14px;
+  font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--primary); background: color-mix(in srgb, var(--primary) 12%, var(--card));
+  padding: 5px 12px; border-radius: var(--r-pill);
+}
+.card h3 { margin: 0 0 6px; font-size: 18px; font-weight: 700; }
+.card p { margin: 0; color: var(--ink-soft); font-size: 13.5px; line-height: 1.5; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.chip {
+  font-size: 12.5px; font-weight: 600; padding: 7px 13px; border-radius: var(--r-pill);
+  background: var(--surface-2); color: var(--ink); border: 1px solid var(--line); cursor: pointer;
+  transition: transform var(--dur-fast) var(--spring), background var(--dur) var(--ease);
+}
+.chip:hover { transform: translateY(-2px); }
+.chip.on { background: color-mix(in srgb, var(--accent) 72%, var(--card)); border-color: transparent; color: var(--accent-ink); }
+
+.btn {
+  border: none; cursor: pointer; font-weight: 700; font-size: 14px; padding: 12px 20px;
+  border-radius: var(--r-pill); background: var(--primary); color: var(--primary-ink);
+  box-shadow: var(--shadow-1); transition: transform var(--dur-fast) var(--spring), background var(--dur) var(--ease);
+}
+.btn:hover { background: var(--primary-hover); }
+.btn:active { transform: scale(.96); }
+.btn.tonal { background: color-mix(in srgb, var(--accent) 70%, var(--card)); color: var(--accent-ink); }
+
+.thumb {
+  margin-top: 16px; aspect-ratio: 16/9; border-radius: var(--r-md);
+  background: linear-gradient(135deg, var(--surface-2), var(--card));
+  display: grid; place-items: center; color: var(--ink-soft); font-size: 13px;
+  border: 1px dashed var(--line);
+}
+
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .card { animation: none; opacity: 1; transform: none; }
+  * { transition-duration: .01ms !important; }
+}
+@media (max-width: 560px) {
+  .app { grid-template-columns: 1fr; }
+  .rail { position: fixed; z-index: 40; height: 100%; transform: translateX(-100%); width: 264px; }
+  .app.mobileopen .rail { transform: none; }
+}
