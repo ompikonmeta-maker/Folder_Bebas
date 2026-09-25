@@ -1,0 +1,53 @@
+name: Build Windows
+
+# Produces the Windows installer (.exe / .msi) and a portable .exe.
+# Run automatically on pushes to the working branch, or manually from the
+# Actions tab (workflow_dispatch). Download the result from the run's
+# "Artifacts" section.
+
+on:
+  push:
+    branches: [claude/adoring-edison-wc44re, main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Build Tauri app (NSIS installer + exe)
+        run: npx tauri build --bundles nsis
+
+      - name: Upload installer (NSIS)
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipforge-studio-installer
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: warn
+
+      - name: Upload portable exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipforge-studio-portable
+          path: src-tauri/target/release/clipforge-studio.exe
+          if-no-files-found: warn

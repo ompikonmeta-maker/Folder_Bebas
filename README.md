@@ -47,6 +47,19 @@ npm run tauri:build    # produce a Windows installer / .exe
 
 Generate app icons once before `tauri:build` (see `src-tauri/icons/README.md`).
 
+### Get the Windows installer without a Windows machine
+
+The Windows `.exe` can only be built on Windows (MSVC + WebView2 + NSIS). A
+GitHub Actions workflow does this for you: `.github/workflows/build-windows.yml`
+runs on a Windows runner on every push to the working branch, or on demand from
+the **Actions** tab (**Run workflow**). When it finishes, download the installer
+from the run's **Artifacts** section (`clipforge-studio-installer`) and the
+standalone binary (`clipforge-studio-portable`).
+
+FFmpeg is not bundled yet — install it on the target machine (add `ffmpeg.exe`
+and `ffprobe.exe` to `PATH`, or set `CLIPFORGE_FFMPEG_DIR`). The app runs without
+it; only clipping/export are disabled until it's found.
+
 ## Architecture
 
 - `src/` — React UI. `styles/tokens.css` holds the entire color system
