@@ -28,6 +28,15 @@ function fmt(sec: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+/** Parse a timecode like "3:25", "1:02:03", or "90" into seconds. NaN if invalid. */
+function parseTC(v: string): number {
+  const t = v.trim();
+  if (!t) return NaN;
+  const parts = t.split(":").map((p) => Number(p));
+  if (parts.some((n) => Number.isNaN(n) || n < 0)) return NaN;
+  return parts.reduce((acc, n) => acc * 60 + n, 0);
+}
+
 const STEPS = ["Import", "Clip", "Reformat", "Combine", "Export"] as const;
 
 interface Props {
@@ -46,7 +55,8 @@ export function ClipperWizard({ projectId, projectName, onToggleSidebar, onGoToQ
   const [mode, setMode] = useState<ClipMode>("auto");
   const [lenKey, setLenKey] = useState("1");
   const [customMin, setCustomMin] = useState("1.5");
-  const [ranges, setRanges] = useState<[number, number][]>([[0, 1]]); // minutes
+  // Manual segments as "m:ss" timecodes into the source video.
+  const [ranges, setRanges] = useState<[string, string][]>([["0:00", "1:00"]]);
 
   const [clips, setClips] = useState<Clip[]>([]);
   const [busy, setBusy] = useState(false);
@@ -94,10 +104,14 @@ export function ClipperWizard({ projectId, projectName, onToggleSidebar, onGoToQ
     return parseInt(lenKey, 10) * 60;
   }, [lenKey, customMin]);
 
+  const parsedRanges = ranges
+    .map((r) => [parseTC(r[0]), parseTC(r[1])] as [number, number])
+    .filter((r) => !Number.isNaN(r[0]) && !Number.isNaN(r[1]) && r[1] > r[0]);
+
   const estCount =
     mode === "auto" && source?.duration_sec
       ? Math.ceil(source.duration_sec / segmentSec)
-      : ranges.filter((r) => r[1] > r[0]).length;
+      : parsedRanges.length;
 
   // ---- handlers ----
   async function handleImport() {
@@ -133,11 +147,8 @@ export function ClipperWizard({ projectId, projectName, onToggleSidebar, onGoToQ
         sourceId: source.id,
         mode,
         segmentSec: mode === "auto" ? segmentSec : undefined,
-        // Manual ranges are entered in MINUTES; convert to seconds for ffmpeg.
-        segments:
-          mode === "manual"
-            ? ranges.filter((r) => r[1] > r[0]).map((r) => [r[0] * 60, r[1] * 60] as [number, number])
-            : undefined,
+        // Manual ranges are m:ss timecodes already parsed to seconds.
+        segments: mode === "manual" ? parsedRanges : undefined,
       });
       setClips((prev) => [...prev, ...made]);
     } catch (e) {
@@ -349,17 +360,25 @@ export function ClipperWizard({ projectId, projectName, onToggleSidebar, onGoToQ
               </>
             ) : (
               <div className="ranges">
-                <label className="lbl">Segments (minutes — start → end)</label>
-                {ranges.map((r, i) => (
-                  <div className="range-row" key={i}>
-                    <input type="number" min="0" step="0.1" value={r[0]} onChange={(e) => setRanges((rs) => rs.map((x, j) => (j === i ? [parseFloat(e.target.value) || 0, x[1]] : x)))} />
-                    <span>→</span>
-                    <input type="number" min="0" step="0.1" value={r[1]} onChange={(e) => setRanges((rs) => rs.map((x, j) => (j === i ? [x[0], parseFloat(e.target.value) || 0] : x)))} />
-                    <span className="unit">min</span>
-                    <button className="mini" onClick={() => setRanges((rs) => rs.filter((_, j) => j !== i))}>✕</button>
-                  </div>
-                ))}
-                <button className="btn tonal" onClick={() => setRanges((rs) => [...rs, [0, 1]])}>＋ Add segment</button>
+                <label className="lbl">Segments — start → end (m:ss into the video, e.g. 3:25 → 4:37)</label>
+                {ranges.map((r, i) => {
+                  const a = parseTC(r[0]);
+                  const b = parseTC(r[1]);
+                  const bad = r[0] && r[1] && (Number.isNaN(a) || Number.isNaN(b) || b <= a);
+                  const dur = !bad && !Number.isNaN(a) && !Number.isNaN(b) ? fmt(b - a) : "—";
+                  return (
+                    <div className="range-row" key={i}>
+                      <input className={bad ? "bad" : ""} type="text" inputMode="numeric" placeholder="3:25" value={r[0]}
+                        onChange={(e) => setRanges((rs) => rs.map((x, j) => (j === i ? [e.target.value, x[1]] : x)))} />
+                      <span>→</span>
+                      <input className={bad ? "bad" : ""} type="text" inputMode="numeric" placeholder="4:37" value={r[1]}
+                        onChange={(e) => setRanges((rs) => rs.map((x, j) => (j === i ? [x[0], e.target.value] : x)))} />
+                      <span className="unit">= {dur}</span>
+                      <button className="mini" onClick={() => setRanges((rs) => rs.filter((_, j) => j !== i))}>✕</button>
+                    </div>
+                  );
+                })}
+                <button className="btn tonal" onClick={() => setRanges((rs) => [...rs, ["0:00", "1:00"]])}>＋ Add segment</button>
               </div>
             )}
             <p className="hint-line">≈ {estCount} clip{estCount === 1 ? "" : "s"}</p>

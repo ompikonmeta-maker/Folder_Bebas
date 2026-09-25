@@ -164,7 +164,8 @@ input[type="number"] { font: inherit; padding: 9px 12px; border-radius: var(--r-
 /* ---- Manual ranges ---- */
 .ranges { display: flex; flex-direction: column; gap: 8px; }
 .range-row { display: flex; align-items: center; gap: 8px; }
-.range-row input { flex: 1; }
+.range-row input { flex: 1; min-width: 0; font: inherit; padding: 9px 12px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-variant-numeric: tabular-nums; }
+.range-row input.bad { border-color: var(--danger); }
 .mini { border: none; background: var(--surface-2); color: var(--ink-soft); width: 32px; height: 32px; border-radius: 10px; cursor: pointer; flex: none; }
 .mini:hover { color: var(--danger); }
 
