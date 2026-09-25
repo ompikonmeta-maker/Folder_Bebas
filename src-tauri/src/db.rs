@@ -66,6 +66,7 @@ pub struct ExportJob {
     pub progress: i64,
     pub output_path: Option<String>,
     pub error: Option<String>,
+    pub out_dir: Option<String>,
     pub created_at: String,
 }
 
@@ -79,6 +80,7 @@ pub struct NewJob {
     pub ending_id: Option<i64>,
     pub width: i64,
     pub height: i64,
+    pub out_dir: Option<String>,
 }
 
 /// A clip to create — start/end in seconds. Used by both auto and manual modes.
@@ -174,6 +176,7 @@ impl Db {
             "ALTER TABLE export_jobs ADD COLUMN width INTEGER",
             "ALTER TABLE export_jobs ADD COLUMN height INTEGER",
             "ALTER TABLE export_jobs ADD COLUMN error TEXT",
+            "ALTER TABLE export_jobs ADD COLUMN out_dir TEXT",
         ] {
             let _ = self.conn.execute(col, []);
         }
@@ -431,16 +434,16 @@ impl Db {
     // ---- Export jobs ----
 
     const JOB_COLS: &'static str = "id, project_id, clip_id, platform_preset, resolution, combine, \
-        opener_id, ending_id, width, height, status, progress, output_path, error, created_at";
+        opener_id, ending_id, width, height, status, progress, output_path, error, out_dir, created_at";
 
     pub fn insert_job(&self, project_id: i64, j: &NewJob) -> rusqlite::Result<ExportJob> {
         self.conn.execute(
             "INSERT INTO export_jobs
-             (project_id, clip_id, platform_preset, resolution, combine, opener_id, ending_id, width, height)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             (project_id, clip_id, platform_preset, resolution, combine, opener_id, ending_id, width, height, out_dir)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 project_id, j.clip_id, j.platform_preset, j.resolution, j.combine as i64,
-                j.opener_id, j.ending_id, j.width, j.height
+                j.opener_id, j.ending_id, j.width, j.height, j.out_dir
             ],
         )?;
         self.get_job(self.conn.last_insert_rowid())
@@ -509,7 +512,18 @@ impl Db {
             progress: r.get(11)?,
             output_path: r.get(12)?,
             error: r.get(13)?,
-            created_at: r.get(14)?,
+            out_dir: r.get(14)?,
+            created_at: r.get(15)?,
         })
+    }
+
+    // ---- Library rename ----
+
+    pub fn rename_library_asset(&self, id: i64, name: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE library_assets SET name = ?2 WHERE id = ?1",
+            rusqlite::params![id, name],
+        )?;
+        Ok(())
     }
 }

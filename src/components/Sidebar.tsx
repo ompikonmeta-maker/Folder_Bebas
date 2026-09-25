@@ -1,11 +1,19 @@
 import { ThemeToggle } from "./ThemeToggle";
 import type { Theme } from "../lib/theme";
 
-export type NavKey = "projects" | "clipper" | "library" | "queue" | "settings";
+export type NavKey =
+  | "projects"
+  | "project"
+  | "studio"
+  | "clips"
+  | "library"
+  | "queue"
+  | "settings";
 
 const ITEMS: { key: NavKey; icon: string; label: string }[] = [
   { key: "projects", icon: "◆", label: "Projects" },
-  { key: "clipper", icon: "✂", label: "Clipper" },
+  { key: "studio", icon: "✂", label: "Clip Studio" },
+  { key: "clips", icon: "▷", label: "Clips" },
   { key: "library", icon: "▦", label: "Library" },
   { key: "queue", icon: "⤓", label: "Export & Queue" },
   { key: "settings", icon: "⚙", label: "Settings" },

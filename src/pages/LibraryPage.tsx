@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { deleteLibraryAsset, listLibrary, pickAndImportAsset } from "../lib/api";
+import { deleteLibraryAsset, listLibrary, pickAndImportAsset, renameLibraryAsset } from "../lib/api";
 import type { AssetKind, LibraryAsset } from "../types";
 
 interface Props {
@@ -10,6 +10,8 @@ export function LibraryPage({ onToggleSidebar }: Props) {
   const [openers, setOpeners] = useState<LibraryAsset[]>([]);
   const [endings, setEndings] = useState<LibraryAsset[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
 
   function refresh() {
     listLibrary("opener").then(setOpeners).catch(() => {});
@@ -34,6 +36,12 @@ export function LibraryPage({ onToggleSidebar }: Props) {
       setError(String(e));
     }
   }
+  async function commitRename(id: number) {
+    const n = editName.trim();
+    if (n) await renameLibraryAsset(id, n).catch((e) => setError(String(e)));
+    setEditId(null);
+    refresh();
+  }
 
   const section = (title: string, kind: AssetKind, items: LibraryAsset[]) => (
     <div className="panel">
@@ -49,10 +57,25 @@ export function LibraryPage({ onToggleSidebar }: Props) {
             <div className="clip" key={a.id}>
               <div className="clip-thumb">{kind === "opener" ? "⭰" : "⭲"}</div>
               <div className="clip-body">
-                <b>{a.name}</b>
-                <small>{a.file_path}</small>
+                {editId === a.id ? (
+                  <input
+                    className="select"
+                    autoFocus
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") commitRename(a.id);
+                      if (e.key === "Escape") setEditId(null);
+                    }}
+                    onBlur={() => commitRename(a.id)}
+                  />
+                ) : (
+                  <b className="ellipsis" onDoubleClick={() => { setEditId(a.id); setEditName(a.name); }}>{a.name}</b>
+                )}
+                <small className="ellipsis">{a.file_path}</small>
               </div>
               <div className="clip-actions">
+                <button className="mini format" title="Rename" onClick={() => { setEditId(a.id); setEditName(a.name); }}>✎</button>
                 <button className="mini" title="Remove" onClick={() => remove(a.id)}>✕</button>
               </div>
             </div>

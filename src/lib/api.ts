@@ -232,6 +232,23 @@ export async function pickAndImportAsset(kind: AssetKind): Promise<LibraryAsset 
   return invoke<LibraryAsset>("import_library_asset", { kind, srcPath: selected });
 }
 
+export async function renameLibraryAsset(id: number, name: string): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    mockLibrary = mockLibrary.map((a) => (a.id === id ? { ...a, name } : a));
+    return;
+  }
+  return invoke<void>("rename_library_asset", { id, name });
+}
+
+/** Open a folder picker; returns the chosen directory or null. */
+export async function pickDirectory(): Promise<string | null> {
+  if (!isDesktop()) return "(preview)/chosen-folder";
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const dir = await open({ directory: true, multiple: false });
+  return typeof dir === "string" ? dir : null;
+}
+
 export async function deleteLibraryAsset(id: number): Promise<void> {
   const invoke = await getInvoke();
   if (!invoke) {
@@ -287,6 +304,7 @@ export interface EnqueueArgs {
   endingId?: number | null;
   width: number;
   height: number;
+  outDir?: string | null;
 }
 
 export async function enqueueExports(args: EnqueueArgs): Promise<ExportJob[]> {
@@ -307,6 +325,7 @@ export async function enqueueExports(args: EnqueueArgs): Promise<ExportJob[]> {
       progress: 0,
       output_path: null,
       error: null,
+      out_dir: args.outDir ?? null,
       created_at: new Date().toISOString(),
     }));
     mockJobs = [...mockJobs, ...jobs];
@@ -322,6 +341,7 @@ export async function enqueueExports(args: EnqueueArgs): Promise<ExportJob[]> {
     endingId: args.endingId ?? null,
     width: args.width,
     height: args.height,
+    outDir: args.outDir ?? null,
   });
 }
 

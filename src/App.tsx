@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Sidebar, type NavKey } from "./components/Sidebar";
 import { ClipperWizard } from "./pages/ClipperWizard";
+import { ClipsPreview } from "./pages/ClipsPreview";
 import { ProjectsPage } from "./pages/ProjectsPage";
+import { ProjectOverview } from "./pages/ProjectOverview";
 import { LibraryPage } from "./pages/LibraryPage";
 import { RenderQueue } from "./pages/RenderQueue";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -65,7 +67,7 @@ export default function App() {
   function openProject(id: number) {
     setActiveId(id);
     saveActive(id);
-    setNav("clipper");
+    setNav("project");
   }
 
   async function handleCreate(name: string) {
@@ -103,19 +105,31 @@ export default function App() {
         return <LibraryPage onToggleSidebar={toggleSidebar} />;
       case "settings":
         return <SettingsPage theme={theme} onToggleTheme={toggleTheme} onToggleSidebar={toggleSidebar} />;
-      case "clipper":
+      case "project":
+      case "studio":
+      case "clips":
       case "queue":
         if (!activeProject) return <NoProject onToggleSidebar={toggleSidebar} onGo={() => setNav("projects")} />;
-        return nav === "clipper" ? (
-          <ClipperWizard
-            projectId={activeProject.id}
-            projectName={activeProject.name}
-            onToggleSidebar={toggleSidebar}
-            onGoToQueue={() => setNav("queue")}
-          />
-        ) : (
-          <RenderQueue projectId={activeProject.id} onToggleSidebar={toggleSidebar} />
-        );
+        if (nav === "project")
+          return <ProjectOverview project={activeProject} onToggleSidebar={toggleSidebar} onGo={setNav} />;
+        if (nav === "studio")
+          return (
+            <ClipperWizard
+              projectId={activeProject.id}
+              projectName={activeProject.name}
+              onToggleSidebar={toggleSidebar}
+              onGoToQueue={() => setNav("queue")}
+            />
+          );
+        if (nav === "clips")
+          return (
+            <ClipsPreview
+              projectId={activeProject.id}
+              projectName={activeProject.name}
+              onToggleSidebar={toggleSidebar}
+            />
+          );
+        return <RenderQueue projectId={activeProject.id} onToggleSidebar={toggleSidebar} />;
     }
   }
 

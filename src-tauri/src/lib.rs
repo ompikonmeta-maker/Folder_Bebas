@@ -64,6 +64,7 @@ pub fn run() {
             commands::reformat_clip,
             commands::import_library_asset,
             commands::list_library,
+            commands::rename_library_asset,
             commands::delete_library_asset,
             commands::combine_clip,
             commands::enqueue_exports,

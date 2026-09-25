@@ -17,6 +17,7 @@ import {
   openProjectExports,
   pickAndImport,
   pickAndImportAsset,
+  pickDirectory,
   reformatClip,
   type FfmpegStatus,
 } from "../lib/api";
@@ -45,7 +46,7 @@ export function ClipperWizard({ projectId, projectName, onToggleSidebar, onGoToQ
   const [mode, setMode] = useState<ClipMode>("auto");
   const [lenKey, setLenKey] = useState("1");
   const [customMin, setCustomMin] = useState("1.5");
-  const [ranges, setRanges] = useState<[number, number][]>([[0, 60]]);
+  const [ranges, setRanges] = useState<[number, number][]>([[0, 1]]); // minutes
 
   const [clips, setClips] = useState<Clip[]>([]);
   const [busy, setBusy] = useState(false);
@@ -61,6 +62,7 @@ export function ClipperWizard({ projectId, projectName, onToggleSidebar, onGoToQ
   const [openerId, setOpenerId] = useState<number | null>(null);
   const [endingId, setEndingId] = useState<number | null>(null);
   const [combineOnExport, setCombineOnExport] = useState(true);
+  const [exportDir, setExportDir] = useState<string | null>(null);
 
   const dims = useMemo(() => targetDims(preset, res), [preset, res]);
   const disabled = !!ff && !ff.found;
@@ -131,7 +133,11 @@ export function ClipperWizard({ projectId, projectName, onToggleSidebar, onGoToQ
         sourceId: source.id,
         mode,
         segmentSec: mode === "auto" ? segmentSec : undefined,
-        segments: mode === "manual" ? ranges.filter((r) => r[1] > r[0]) : undefined,
+        // Manual ranges are entered in MINUTES; convert to seconds for ffmpeg.
+        segments:
+          mode === "manual"
+            ? ranges.filter((r) => r[1] > r[0]).map((r) => [r[0] * 60, r[1] * 60] as [number, number])
+            : undefined,
       });
       setClips((prev) => [...prev, ...made]);
     } catch (e) {
@@ -229,6 +235,7 @@ export function ClipperWizard({ projectId, projectName, onToggleSidebar, onGoToQ
         endingId,
         width: dims.w,
         height: dims.h,
+        outDir: exportDir,
       });
       onGoToQueue();
     } catch (e) {
@@ -342,16 +349,17 @@ export function ClipperWizard({ projectId, projectName, onToggleSidebar, onGoToQ
               </>
             ) : (
               <div className="ranges">
-                <label className="lbl">Segments (seconds)</label>
+                <label className="lbl">Segments (minutes — start → end)</label>
                 {ranges.map((r, i) => (
                   <div className="range-row" key={i}>
-                    <input type="number" min="0" value={r[0]} onChange={(e) => setRanges((rs) => rs.map((x, j) => (j === i ? [parseFloat(e.target.value) || 0, x[1]] : x)))} />
+                    <input type="number" min="0" step="0.1" value={r[0]} onChange={(e) => setRanges((rs) => rs.map((x, j) => (j === i ? [parseFloat(e.target.value) || 0, x[1]] : x)))} />
                     <span>→</span>
-                    <input type="number" min="0" value={r[1]} onChange={(e) => setRanges((rs) => rs.map((x, j) => (j === i ? [x[0], parseFloat(e.target.value) || 0] : x)))} />
+                    <input type="number" min="0" step="0.1" value={r[1]} onChange={(e) => setRanges((rs) => rs.map((x, j) => (j === i ? [x[0], parseFloat(e.target.value) || 0] : x)))} />
+                    <span className="unit">min</span>
                     <button className="mini" onClick={() => setRanges((rs) => rs.filter((_, j) => j !== i))}>✕</button>
                   </div>
                 ))}
-                <button className="btn tonal" onClick={() => setRanges((rs) => [...rs, [0, 60]])}>＋ Add segment</button>
+                <button className="btn tonal" onClick={() => setRanges((rs) => [...rs, [0, 1]])}>＋ Add segment</button>
               </div>
             )}
             <p className="hint-line">≈ {estCount} clip{estCount === 1 ? "" : "s"}</p>
@@ -392,7 +400,7 @@ export function ClipperWizard({ projectId, projectName, onToggleSidebar, onGoToQ
                   ))}
                 </div>
                 <p className="hint-line">Output {dims.w}×{dims.h} · center-crop</p>
-                <button className="btn" disabled={clips.length === 0 || disabled || formatting.size > 0} onClick={() => handleReformat(clips.map((c) => c.id))}>
+                <button className="btn block" disabled={clips.length === 0 || disabled || formatting.size > 0} onClick={() => handleReformat(clips.map((c) => c.id))}>
                   {formatting.size > 0 ? `Formatting ${formatting.size}…` : `Format all ${clips.length} →`}
                 </button>
               </div>
@@ -412,7 +420,7 @@ export function ClipperWizard({ projectId, projectName, onToggleSidebar, onGoToQ
             <p className="muted">Prepend an opener and append an ending, normalized to {dims.w}×{dims.h}. Manage the library on the Library page.</p>
             <AssetPicker label="Opener" assets={openers} selected={openerId} onSelect={setOpenerId} onImport={() => handleImportAsset("opener")} onDelete={(id) => handleDeleteAsset("opener", id)} />
             <AssetPicker label="Ending" assets={endings} selected={endingId} onSelect={setEndingId} onImport={() => handleImportAsset("ending")} onDelete={(id) => handleDeleteAsset("ending", id)} />
-            <button className="btn" disabled={clips.length === 0 || disabled || combining.size > 0} onClick={() => handleCombine(clips.map((c) => c.id))}>
+            <button className="btn block" disabled={clips.length === 0 || disabled || combining.size > 0} onClick={() => handleCombine(clips.map((c) => c.id))}>
               {combining.size > 0 ? `Combining ${combining.size}…` : `Combine all ${clips.length} →`}
             </button>
             {clips.length > 0 && <div className="section-h">Clips</div>}
@@ -429,6 +437,20 @@ export function ClipperWizard({ projectId, projectName, onToggleSidebar, onGoToQ
               <input type="checkbox" checked={combineOnExport} onChange={(e) => setCombineOnExport(e.target.checked)} />
               Include opener + ending
             </label>
+
+            <label className="lbl">Save results to</label>
+            <div className="saveas">
+              <code className="path">{exportDir ?? "Project exports folder (default)"}</code>
+              <div className="saveas-btns">
+                {isDesktop() && (
+                  <button className="btn tonal" onClick={async () => { const d = await pickDirectory(); if (d) setExportDir(d); }}>
+                    Choose folder…
+                  </button>
+                )}
+                {exportDir && <button className="btn ghost" onClick={() => setExportDir(null)}>Reset</button>}
+              </div>
+            </div>
+
             <div className="btn-row">
               <button className="btn" disabled={clips.length === 0 || disabled} onClick={handleQueueExport}>
                 Queue {clips.length} clip{clips.length === 1 ? "" : "s"} & open queue →

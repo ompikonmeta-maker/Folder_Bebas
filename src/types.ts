@@ -58,6 +58,7 @@ export interface ExportJob {
   progress: number; // 0..100
   output_path: string | null;
   error: string | null;
+  out_dir: string | null;
   created_at: string;
 }
 

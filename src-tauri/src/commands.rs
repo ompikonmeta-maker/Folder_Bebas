@@ -277,6 +277,12 @@ pub fn list_library(state: State<AppState>, kind: String) -> Result<Vec<LibraryA
 }
 
 #[tauri::command]
+pub fn rename_library_asset(state: State<AppState>, id: i64, name: String) -> Result<(), String> {
+    let db = state.db.lock().map_err(map_err)?;
+    db.rename_library_asset(id, &name).map_err(map_err)
+}
+
+#[tauri::command]
 pub fn delete_library_asset(state: State<AppState>, id: i64) -> Result<(), String> {
     let db = state.db.lock().map_err(map_err)?;
     if let Some(path) = db.delete_library_asset(id).map_err(map_err)? {
@@ -327,9 +333,10 @@ pub fn combine_clip(
         "combine_progress",
         CombineProgress { stage: "normalize".into(), clip_id, output: None },
     );
-    let proj_dir = storage::project_dir(&state.storage_root, project_id);
+    let dest = storage::project_dir(&state.storage_root, project_id).join("exports");
+    std::fs::create_dir_all(&dest).ok();
     let out_str = combine_parts(
-        &proj_dir,
+        &dest,
         clip_id,
         &clip_path,
         opener_path,
@@ -349,7 +356,7 @@ pub fn combine_clip(
 /// into `exports/`. Temp parts are cleaned up. Returns the output path.
 #[allow(clippy::too_many_arguments)]
 fn combine_parts(
-    proj_dir: &Path,
+    dest_dir: &Path,
     clip_id: i64,
     clip_path: &str,
     opener_path: Option<String>,
@@ -367,7 +374,7 @@ fn combine_parts(
         sources.push(PathBuf::from(p));
     }
 
-    let exports_dir = proj_dir.join("exports");
+    let exports_dir = dest_dir.to_path_buf();
     let tmp_dir = exports_dir.join(".tmp");
     std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("mkdir tmp failed: {e}"))?;
 
@@ -501,7 +508,10 @@ pub fn enqueue_exports(
     ending_id: Option<i64>,
     width: i64,
     height: i64,
+    out_dir: Option<String>,
 ) -> Result<Vec<ExportJob>, String> {
+    // Normalize an empty string to None.
+    let out_dir = out_dir.filter(|s| !s.trim().is_empty());
     let db = state.db.lock().map_err(map_err)?;
     let mut jobs = Vec::new();
     for clip_id in clip_ids {
@@ -517,6 +527,7 @@ pub fn enqueue_exports(
                     ending_id: if combine { ending_id } else { None },
                     width,
                     height,
+                    out_dir: out_dir.clone(),
                 },
             )
             .map_err(map_err)?;
@@ -621,13 +632,18 @@ fn run_one_job(
         (clip_path, dur, opener, ending)
     };
 
-    let proj_dir = storage::project_dir(&state.storage_root, job.project_id);
+    // Destination: the job's chosen "Save as" folder, else the project exports.
+    let dest = match job.out_dir.as_deref().filter(|s| !s.trim().is_empty()) {
+        Some(d) => PathBuf::from(d),
+        None => storage::project_dir(&state.storage_root, job.project_id).join("exports"),
+    };
+    std::fs::create_dir_all(&dest).ok();
+
     if job.combine && (opener_path.is_some() || ending_path.is_some()) {
-        combine_parts(&proj_dir, clip_id, &clip_path, opener_path, ending_path, width, height, on)
+        combine_parts(&dest, clip_id, &clip_path, opener_path, ending_path, width, height, on)
     } else {
         // Reformat only.
-        let exports_dir = proj_dir.join("exports");
-        std::fs::create_dir_all(&exports_dir).ok();
+        let exports_dir = dest;
         let stem = Path::new(&clip_path)
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
