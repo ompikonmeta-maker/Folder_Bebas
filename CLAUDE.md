@@ -53,6 +53,10 @@ Two halves talk over Tauri's `invoke` bridge:
   the `export_jobs` table: `enqueue_exports` inserts queued rows, `run_queue`
   processes them sequentially (combine or reformat per job), persisting status
   and emitting `job_progress`; the `RenderQueue` page (nav "queue") drives it.
+  Encoding runs stream ffmpeg `-progress pipe:1` through `run_encode`, so queue
+  bars reflect real progress. Extras: `clip_thumbnail` (returns a JPEG data URI),
+  `delete_clip`/`delete_source` (row + files; sources cascade), `reveal_path`
+  (opens the OS file manager).
 
 ## Conventions
 

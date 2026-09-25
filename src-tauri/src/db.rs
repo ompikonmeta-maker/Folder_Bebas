@@ -295,6 +295,43 @@ impl Db {
         rows.collect()
     }
 
+    /// Delete a clip row; returns its file path (if any) for the caller to unlink.
+    pub fn delete_clip(&self, id: i64) -> rusqlite::Result<Option<String>> {
+        let path: Option<String> = self
+            .conn
+            .query_row("SELECT file_path FROM clips WHERE id = ?1", [id], |r| {
+                r.get::<_, Option<String>>(0)
+            })
+            .ok()
+            .flatten();
+        self.conn.execute("DELETE FROM clips WHERE id = ?1", [id])?;
+        Ok(path)
+    }
+
+    /// Delete a source and (via cascade) its clips. Returns the source path and
+    /// all clip file paths, gathered before deletion, for the caller to unlink.
+    pub fn delete_source(&self, id: i64) -> rusqlite::Result<(Option<String>, Vec<String>)> {
+        let src: Option<String> = self
+            .conn
+            .query_row("SELECT file_path FROM source_videos WHERE id = ?1", [id], |r| {
+                r.get::<_, String>(0)
+            })
+            .ok();
+        let mut clip_paths = Vec::new();
+        {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT file_path FROM clips WHERE source_id = ?1")?;
+            let rows = stmt.query_map([id], |r| r.get::<_, Option<String>>(0))?;
+            for r in rows.flatten().flatten() {
+                clip_paths.push(r);
+            }
+        }
+        self.conn
+            .execute("DELETE FROM source_videos WHERE id = ?1", [id])?;
+        Ok((src, clip_paths))
+    }
+
     fn map_clip(r: &rusqlite::Row) -> rusqlite::Result<Clip> {
         Ok(Clip {
             id: r.get(0)?,

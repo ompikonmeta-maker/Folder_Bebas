@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { clearFinishedJobs, listJobs, onJobProgress, runQueue } from "../lib/api";
+import { clearFinishedJobs, isDesktop, listJobs, onJobProgress, revealPath, runQueue } from "../lib/api";
 import { presetByKey } from "../lib/presets";
 import type { ExportJob } from "../types";
 
@@ -107,6 +107,15 @@ export function RenderQueue({ onToggleSidebar }: Props) {
                   />
                 </div>
               </div>
+              {isDesktop() && j.status === "done" && j.output_path && (
+                <button
+                  className="mini format"
+                  title="Open output folder"
+                  onClick={() => revealPath(j.output_path ?? "")}
+                >
+                  ⤢
+                </button>
+              )}
             </div>
           ))}
         </div>

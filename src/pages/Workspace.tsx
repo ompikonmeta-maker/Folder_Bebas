@@ -3,8 +3,11 @@ import { Dropdown } from "../components/Dropdown";
 import { Card } from "../components/Card";
 import { RESOLUTIONS, presetByKey, targetDims } from "../lib/presets";
 import {
+  clipThumbnail,
   combineClip,
+  deleteClip,
   deleteLibraryAsset,
+  deleteSource,
   enqueueExports,
   ffmpegStatus,
   generateClips,
@@ -17,6 +20,7 @@ import {
   pickAndImport,
   pickAndImportAsset,
   reformatClip,
+  revealPath,
   type ClipProgress,
   type FfmpegStatus,
 } from "../lib/api";
@@ -171,6 +175,38 @@ export function Workspace({ onToggleSidebar, onGoToQueue }: Props) {
     }
   }
 
+  async function handleDeleteClip(id: number) {
+    try {
+      await deleteClip(id);
+      setClips((cs) => cs.filter((c) => c.id !== id));
+      setOutputs((o) => {
+        const n = { ...o };
+        delete n[id];
+        return n;
+      });
+      setFinals((f) => {
+        const n = { ...f };
+        delete n[id];
+        return n;
+      });
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function handleDeleteSource() {
+    if (!source) return;
+    try {
+      await deleteSource(source.id);
+      setSource(null);
+      setClips([]);
+      setOutputs({});
+      setFinals({});
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   async function handleQueueExport() {
     if (clips.length === 0) {
       setError("Generate clips first.");
@@ -261,9 +297,14 @@ export function Workspace({ onToggleSidebar, onGoToQueue }: Props) {
                 <span>▭ {source.width ?? "?"}×{source.height ?? "?"}</span>
                 <span>🎞 {source.fps ? source.fps.toFixed(0) : "?"} fps</span>
               </div>
-              <button className="btn tonal" style={{ marginTop: 14 }} onClick={handleImport}>
-                Replace
-              </button>
+              <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                <button className="btn tonal" onClick={handleImport}>
+                  Replace
+                </button>
+                <button className="btn tonal danger-btn" onClick={handleDeleteSource}>
+                  Remove
+                </button>
+              </div>
             </>
           ) : (
             <>
@@ -449,52 +490,111 @@ export function Workspace({ onToggleSidebar, onGoToQueue }: Props) {
       </div>
 
       {/* Generated clips */}
-      <h2 className="section-h">Clips ({clips.length})</h2>
+      <div className="section-bar">
+        <h2 className="section-h">Clips ({clips.length})</h2>
+        {isDesktop() && (
+          <button className="btn tonal" onClick={() => revealPath("")}>
+            Open exports folder
+          </button>
+        )}
+      </div>
       {clips.length === 0 ? (
         <p className="empty">No clips yet. Import a video and generate.</p>
       ) : (
         <div className="clip-grid">
-          {clips.map((c) => {
-            const isFormatting = formatting.has(c.id);
-            const isCombining = combining.has(c.id);
-            const out = outputs[c.id];
-            const fin = finals[c.id];
-            const disabled = !!ff && !ff.found;
-            return (
-              <div className="clip" key={c.id}>
-                <div className="clip-thumb">▶</div>
-                <div className="clip-body">
-                  <b>{c.file_path?.split(/[\\/]/).pop() ?? `clip ${c.id}`}</b>
-                  <small>
-                    {fmt(c.start_sec)}–{fmt(c.end_sec)} · {fmt(c.end_sec - c.start_sec)} · {c.mode}
-                  </small>
-                  {out && <small className="ok">✂ {out.split(/[\\/]/).pop()}</small>}
-                  {fin && <small className="ok">▣ {fin.split(/[\\/]/).pop()}</small>}
-                </div>
-                <div className="clip-actions">
-                  <button
-                    className="mini format"
-                    title={`Reformat to ${dims.w}×${dims.h}`}
-                    disabled={isFormatting || disabled}
-                    onClick={() => handleReformat([c.id])}
-                  >
-                    {isFormatting ? "…" : "⤓"}
-                  </button>
-                  <button
-                    className="mini format"
-                    title="Combine with opener + ending"
-                    disabled={isCombining || disabled}
-                    onClick={() => handleCombine([c.id])}
-                  >
-                    {isCombining ? "…" : "▣"}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+          {clips.map((c) => (
+            <ClipRow
+              key={c.id}
+              clip={c}
+              dims={dims}
+              disabled={!!ff && !ff.found}
+              isFormatting={formatting.has(c.id)}
+              isCombining={combining.has(c.id)}
+              out={outputs[c.id]}
+              fin={finals[c.id]}
+              onFormat={() => handleReformat([c.id])}
+              onCombine={() => handleCombine([c.id])}
+              onDelete={() => handleDeleteClip(c.id)}
+            />
+          ))}
         </div>
       )}
     </section>
+  );
+}
+
+interface ClipRowProps {
+  clip: Clip;
+  dims: { w: number; h: number };
+  disabled: boolean;
+  isFormatting: boolean;
+  isCombining: boolean;
+  out?: string;
+  fin?: string;
+  onFormat: () => void;
+  onCombine: () => void;
+  onDelete: () => void;
+}
+
+function ClipRow({
+  clip,
+  dims,
+  disabled,
+  isFormatting,
+  isCombining,
+  out,
+  fin,
+  onFormat,
+  onCombine,
+  onDelete,
+}: ClipRowProps) {
+  const [thumb, setThumb] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    clipThumbnail(clip.id).then((t) => {
+      if (alive) setThumb(t);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [clip.id]);
+
+  return (
+    <div className="clip">
+      <div className="clip-thumb" style={thumb ? { backgroundImage: `url(${thumb})` } : undefined}>
+        {!thumb && "▶"}
+      </div>
+      <div className="clip-body">
+        <b>{clip.file_path?.split(/[\\/]/).pop() ?? `clip ${clip.id}`}</b>
+        <small>
+          {fmt(clip.start_sec)}–{fmt(clip.end_sec)} · {fmt(clip.end_sec - clip.start_sec)} · {clip.mode}
+        </small>
+        {out && <small className="ok">✂ {out.split(/[\\/]/).pop()}</small>}
+        {fin && <small className="ok">▣ {fin.split(/[\\/]/).pop()}</small>}
+      </div>
+      <div className="clip-actions">
+        <button
+          className="mini format"
+          title={`Reformat to ${dims.w}×${dims.h}`}
+          disabled={isFormatting || disabled}
+          onClick={onFormat}
+        >
+          {isFormatting ? "…" : "⤓"}
+        </button>
+        <button
+          className="mini format"
+          title="Combine with opener + ending"
+          disabled={isCombining || disabled}
+          onClick={onCombine}
+        >
+          {isCombining ? "…" : "▣"}
+        </button>
+        <button className="mini" title="Delete clip" onClick={onDelete}>
+          ✕
+        </button>
+      </div>
+    </div>
   );
 }
 

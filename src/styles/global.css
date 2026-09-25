@@ -177,11 +177,14 @@ input[type="number"] { font: inherit; padding: 9px 12px; border-radius: var(--r-
 .meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12.5px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 
 /* ---- Clips list ---- */
+.section-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 30px 0 14px; flex-wrap: wrap; }
+.section-bar .section-h { margin: 0; }
 .section-h { font-size: 18px; margin: 30px 0 14px; }
+.danger-btn { color: var(--danger) !important; background: color-mix(in srgb, var(--danger) 12%, var(--card)) !important; }
 .empty { color: var(--ink-faint); font-size: 13.5px; }
 .clip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .clip { display: flex; align-items: center; gap: 12px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px; box-shadow: var(--shadow-1); }
-.clip-thumb { width: 44px; height: 44px; flex: none; border-radius: 10px; display: grid; place-items: center; color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 60%, var(--card)); }
+.clip-thumb { width: 56px; height: 56px; flex: none; border-radius: 10px; display: grid; place-items: center; color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 60%, var(--card)); background-size: cover; background-position: center; overflow: hidden; }
 .clip-body { min-width: 0; flex: 1; }
 .clip b { display: block; font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .clip small { display: block; color: var(--ink-soft); font-size: 12px; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

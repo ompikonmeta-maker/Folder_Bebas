@@ -6,8 +6,9 @@
 //!   3. the system PATH (`ffmpeg` / `ffprobe`)
 
 use serde::Serialize;
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 #[cfg(windows)]
 const EXE: &str = ".exe";
@@ -165,26 +166,81 @@ pub fn cut_segment(input: &Path, output: &Path, start_sec: f64, end_sec: f64) ->
     Ok(())
 }
 
+/// Run an encoding command while streaming ffmpeg's `-progress` output, calling
+/// `on(fraction)` (0.0–1.0) as it advances. `total_sec` is the expected output
+/// duration used to turn elapsed time into a fraction.
+fn run_encode(
+    mut cmd: Command,
+    total_sec: f64,
+    on: &mut dyn FnMut(f64),
+) -> Result<(), String> {
+    cmd.args(["-progress", "pipe:1", "-nostats"]);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| format!("ffmpeg failed to start: {e}"))?;
+
+    if let Some(stdout) = child.stdout.take() {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Some(v) = line.strip_prefix("out_time_us=") {
+                if let Ok(us) = v.trim().parse::<f64>() {
+                    if total_sec > 0.0 {
+                        on((us / 1_000_000.0 / total_sec).clamp(0.0, 1.0));
+                    }
+                }
+            }
+        }
+    }
+
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if !status.success() {
+        let mut err = String::new();
+        if let Some(mut se) = child.stderr.take() {
+            let _ = se.read_to_string(&mut err);
+        }
+        return Err(format!("ffmpeg exited with {status}: {}", err.trim()));
+    }
+    on(1.0);
+    Ok(())
+}
+
 /// Reformat a clip to `w`×`h` using center-crop "cover": scale so the frame is
 /// fully covered, then crop the overflow from the center. Re-encodes to H.264/AAC.
-pub fn reformat(input: &Path, output: &Path, w: i64, h: i64) -> Result<(), String> {
-    let vf = format!(
-        "scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1"
-    );
-    let out = Command::new(ffmpeg_bin())
-        .args(["-hide_banner", "-loglevel", "error", "-y"])
+/// Streams progress via `on` (needs `total_sec`, the clip duration).
+pub fn reformat(
+    input: &Path,
+    output: &Path,
+    w: i64,
+    h: i64,
+    total_sec: f64,
+    on: &mut dyn FnMut(f64),
+) -> Result<(), String> {
+    let vf = format!("scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1");
+    let mut cmd = Command::new(ffmpeg_bin());
+    cmd.args(["-hide_banner", "-loglevel", "error", "-y"])
         .arg("-i")
         .arg(input)
         .args(["-vf", &vf])
         .args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"])
         .args(["-c:a", "aac", "-b:a", "128k"])
         .args(["-movflags", "+faststart"])
+        .arg(output);
+    run_encode(cmd, total_sec, on)
+}
+
+/// Extract a single-frame JPEG thumbnail at `at_sec`, scaled to `width` px wide.
+pub fn thumbnail(input: &Path, output: &Path, at_sec: f64, width: i64) -> Result<(), String> {
+    let vf = format!("scale={width}:-2");
+    let out = Command::new(ffmpeg_bin())
+        .args(["-hide_banner", "-loglevel", "error", "-y"])
+        .args(["-ss", &format!("{at_sec:.3}")])
+        .arg("-i")
+        .arg(input)
+        .args(["-frames:v", "1", "-vf", &vf, "-q:v", "4"])
         .arg(output)
         .output()
         .map_err(|e| format!("ffmpeg failed to start: {e}"))?;
     if !out.status.success() {
         return Err(format!(
-            "ffmpeg reformat exited with {}: {}",
+            "ffmpeg thumbnail exited with {}: {}",
             out.status,
             String::from_utf8_lossy(&out.stderr)
         ));
@@ -210,19 +266,26 @@ pub fn has_audio(input: &Path) -> bool {
 /// Normalize one part to a common shape (W×H cover-crop, `fps`, H.264/yuv420p,
 /// stereo AAC 48k). Silent audio is synthesized when the source has none, so
 /// every normalized part carries a matching audio track for a clean concat.
-pub fn normalize(input: &Path, output: &Path, w: i64, h: i64, fps: u32) -> Result<(), String> {
+pub fn normalize(
+    input: &Path,
+    output: &Path,
+    w: i64,
+    h: i64,
+    fps: u32,
+    on: &mut dyn FnMut(f64),
+) -> Result<(), String> {
     let vf = format!(
         "scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1,fps={fps}"
     );
+    let total = probe(input).ok().and_then(|m| m.duration_sec).unwrap_or(0.0);
+
     let mut cmd = Command::new(ffmpeg_bin());
     cmd.args(["-hide_banner", "-loglevel", "error", "-y"]);
 
     let audio = has_audio(input);
-    if audio {
-        cmd.arg("-i").arg(input);
-    } else {
+    cmd.arg("-i").arg(input);
+    if !audio {
         // main input + synthesized silence
-        cmd.arg("-i").arg(input);
         cmd.args(["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"]);
     }
 
@@ -234,15 +297,7 @@ pub fn normalize(input: &Path, output: &Path, w: i64, h: i64, fps: u32) -> Resul
         .args(["-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "128k"])
         .arg(output);
 
-    let out = cmd.output().map_err(|e| format!("ffmpeg failed to start: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "ffmpeg normalize exited with {}: {}",
-            out.status,
-            String::from_utf8_lossy(&out.stderr)
-        ));
-    }
-    Ok(())
+    run_encode(cmd, total, on)
 }
 
 /// Concatenate already-normalized parts (identical codec params) with stream

@@ -184,10 +184,11 @@ pub fn reformat_clip(
     width: i64,
     height: i64,
 ) -> Result<String, String> {
-    let input = {
+    let (input, total) = {
         let db = state.db.lock().map_err(map_err)?;
         let clip = db.get_clip(clip_id).map_err(map_err)?;
-        clip.file_path.ok_or("clip has no file on disk")?
+        let dur = (clip.end_sec - clip.start_sec).max(0.0);
+        (clip.file_path.ok_or("clip has no file on disk")?, dur)
     };
     let input = PathBuf::from(input);
     let stem = input
@@ -202,7 +203,7 @@ pub fn reformat_clip(
         "reformat_progress",
         ReformatProgress { stage: "start".into(), clip_id, output: None },
     );
-    ffmpeg::reformat(&input, &out, width, height)?;
+    ffmpeg::reformat(&input, &out, width, height, total, &mut |_| {})?;
     let out_str = out.to_string_lossy().to_string();
     let _ = app.emit(
         "reformat_progress",
@@ -306,6 +307,7 @@ pub fn combine_clip(
         ending_path,
         width,
         height,
+        &mut |_| {},
     )?;
     let _ = app.emit(
         "combine_progress",
@@ -316,6 +318,7 @@ pub fn combine_clip(
 
 /// Normalize [opener?] + clip + [ending?] to `width`×`height` and concat them
 /// into `exports/`. Temp parts are cleaned up. Returns the output path.
+#[allow(clippy::too_many_arguments)]
 fn combine_parts(
     storage_root: &Path,
     clip_id: i64,
@@ -324,6 +327,7 @@ fn combine_parts(
     ending_path: Option<String>,
     width: i64,
     height: i64,
+    on: &mut dyn FnMut(f64),
 ) -> Result<String, String> {
     let mut sources: Vec<PathBuf> = Vec::new();
     if let Some(p) = opener_path {
@@ -338,10 +342,14 @@ fn combine_parts(
     let tmp_dir = exports_dir.join(".tmp");
     std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("mkdir tmp failed: {e}"))?;
 
+    // Each normalize step is one equal slice of overall progress; concat is fast.
+    let n = sources.len() as f64;
     let mut normalized: Vec<PathBuf> = Vec::new();
     for (i, src) in sources.iter().enumerate() {
         let part = tmp_dir.join(format!("c{clip_id}_part{i}.mp4"));
-        ffmpeg::normalize(src, &part, width, height, 30)?;
+        let base = i as f64;
+        let mut inner = |pct: f64| on(((base + pct) / n).clamp(0.0, 0.99));
+        ffmpeg::normalize(src, &part, width, height, 30, &mut inner)?;
         normalized.push(part);
     }
 
@@ -359,6 +367,79 @@ fn combine_parts(
     let _ = std::fs::remove_file(&list);
     result?;
     Ok(out.to_string_lossy().to_string())
+}
+
+// ---- Thumbnails, delete, reveal ----
+
+/// Generate a JPEG thumbnail for a clip and return it as a data: URI.
+#[tauri::command]
+pub fn clip_thumbnail(state: State<AppState>, clip_id: i64) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    let (path, dur) = {
+        let db = state.db.lock().map_err(map_err)?;
+        let clip = db.get_clip(clip_id).map_err(map_err)?;
+        let dur = (clip.end_sec - clip.start_sec).max(0.0);
+        (clip.file_path.ok_or("clip has no file on disk")?, dur)
+    };
+
+    let thumbs = state.storage_root.join("clips").join("thumbs");
+    std::fs::create_dir_all(&thumbs).map_err(|e| format!("mkdir thumbs failed: {e}"))?;
+    let out = thumbs.join(format!("clip{clip_id}.jpg"));
+    ffmpeg::thumbnail(&PathBuf::from(&path), &out, dur / 2.0, 240)?;
+
+    let bytes = std::fs::read(&out).map_err(|e| format!("read thumb failed: {e}"))?;
+    Ok(format!("data:image/jpeg;base64,{}", STANDARD.encode(bytes)))
+}
+
+#[tauri::command]
+pub fn delete_clip(state: State<AppState>, clip_id: i64) -> Result<(), String> {
+    let db = state.db.lock().map_err(map_err)?;
+    if let Some(path) = db.delete_clip(clip_id).map_err(map_err)? {
+        let _ = std::fs::remove_file(path);
+    }
+    let _ = std::fs::remove_file(
+        state.storage_root.join("clips").join("thumbs").join(format!("clip{clip_id}.jpg")),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_source(state: State<AppState>, source_id: i64) -> Result<(), String> {
+    let db = state.db.lock().map_err(map_err)?;
+    let (src, clips) = db.delete_source(source_id).map_err(map_err)?;
+    if let Some(p) = src {
+        let _ = std::fs::remove_file(p);
+    }
+    for p in clips {
+        let _ = std::fs::remove_file(p);
+    }
+    Ok(())
+}
+
+/// Reveal a file or folder in the OS file manager. Accepts a file path (opens
+/// its containing folder) or "" for the exports folder.
+#[tauri::command]
+pub fn reveal_path(state: State<AppState>, path: String) -> Result<(), String> {
+    let target = if path.is_empty() {
+        state.storage_root.join("exports")
+    } else {
+        PathBuf::from(&path)
+    };
+    let dir = if target.is_dir() {
+        target.clone()
+    } else {
+        target.parent().map(|p| p.to_path_buf()).unwrap_or(target.clone())
+    };
+
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("explorer").arg(&dir).spawn();
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(&dir).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let result = std::process::Command::new("xdg-open").arg(&dir).spawn();
+
+    result.map(|_| ()).map_err(|e| format!("could not open file manager: {e}"))
 }
 
 // ---- Export queue ----
@@ -437,7 +518,26 @@ pub fn run_queue(
             }
         }
 
-        let outcome = run_one_job(&state, &job);
+        // Stream progress into the job row, throttled to whole-5% steps.
+        let mut last = -1_i64;
+        let outcome = {
+            let app = &app;
+            let state = &state;
+            let job_id = job.id;
+            let mut on = |frac: f64| {
+                let p = (frac * 100.0) as i64;
+                if p - last >= 5 || p >= 100 {
+                    last = p;
+                    if let Ok(db) = state.db.lock() {
+                        let _ = db.update_job(job_id, "running", p, None, None);
+                        if let Ok(j) = db.get_job(job_id) {
+                            let _ = app.emit("job_progress", j);
+                        }
+                    }
+                }
+            };
+            run_one_job(state, &job, &mut on)
+        };
 
         let db = state.db.lock().map_err(map_err)?;
         match outcome {
@@ -452,14 +552,20 @@ pub fn run_queue(
 }
 
 /// Produce the output file for one job: combine when requested, else reformat.
-fn run_one_job(state: &State<AppState>, job: &ExportJob) -> Result<String, String> {
+/// `on(fraction)` reports 0.0–1.0 progress.
+fn run_one_job(
+    state: &State<AppState>,
+    job: &ExportJob,
+    on: &mut dyn FnMut(f64),
+) -> Result<String, String> {
     let clip_id = job.clip_id.ok_or("job has no clip")?;
     let width = job.width.ok_or("job has no width")?;
     let height = job.height.ok_or("job has no height")?;
 
-    let (clip_path, opener_path, ending_path) = {
+    let (clip_path, clip_dur, opener_path, ending_path) = {
         let db = state.db.lock().map_err(map_err)?;
         let clip = db.get_clip(clip_id).map_err(map_err)?;
+        let dur = (clip.end_sec - clip.start_sec).max(0.0);
         let clip_path = clip.file_path.ok_or("clip has no file on disk")?;
         let opener = match job.opener_id {
             Some(id) => Some(db.get_library_asset(id).map_err(map_err)?.file_path),
@@ -469,11 +575,13 @@ fn run_one_job(state: &State<AppState>, job: &ExportJob) -> Result<String, Strin
             Some(id) => Some(db.get_library_asset(id).map_err(map_err)?.file_path),
             None => None,
         };
-        (clip_path, opener, ending)
+        (clip_path, dur, opener, ending)
     };
 
     if job.combine && (opener_path.is_some() || ending_path.is_some()) {
-        combine_parts(&state.storage_root, clip_id, &clip_path, opener_path, ending_path, width, height)
+        combine_parts(
+            &state.storage_root, clip_id, &clip_path, opener_path, ending_path, width, height, on,
+        )
     } else {
         // Reformat only.
         let exports_dir = state.storage_root.join("exports");
@@ -482,7 +590,7 @@ fn run_one_job(state: &State<AppState>, job: &ExportJob) -> Result<String, Strin
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| format!("clip{clip_id}"));
         let out = unique_path(&exports_dir, &format!("{stem}_{width}x{height}.mp4"));
-        ffmpeg::reformat(&PathBuf::from(&clip_path), &out, width, height)?;
+        ffmpeg::reformat(&PathBuf::from(&clip_path), &out, width, height, clip_dur, on)?;
         Ok(out.to_string_lossy().to_string())
     }
 }

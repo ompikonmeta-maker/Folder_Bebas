@@ -338,6 +338,37 @@ export async function onJobProgress(cb: (j: ExportJob) => void): Promise<() => v
   return listen<ExportJob>("job_progress", (e) => cb(e.payload));
 }
 
+// ---- Thumbnails, delete, reveal ----
+
+export async function clipThumbnail(clipId: number): Promise<string | null> {
+  const invoke = await getInvoke();
+  if (!invoke) return null; // browser: no thumbnail
+  try {
+    return await invoke<string>("clip_thumbnail", { clipId });
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteClip(clipId: number): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) return;
+  return invoke<void>("delete_clip", { clipId });
+}
+
+export async function deleteSource(sourceId: number): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) return;
+  return invoke<void>("delete_source", { sourceId });
+}
+
+/** Reveal a file's folder (or the exports folder when path is empty). */
+export async function revealPath(path = ""): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) return;
+  return invoke<void>("reveal_path", { path });
+}
+
 export interface ClipProgress {
   done: number;
   total: number;
