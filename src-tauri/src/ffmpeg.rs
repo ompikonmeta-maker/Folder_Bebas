@@ -152,7 +152,9 @@ pub fn cut_segment(input: &Path, output: &Path, start_sec: f64, end_sec: f64) ->
         .arg("-i")
         .arg(input)
         .args(["-t", &format!("{dur:.3}")])
-        .args(["-c", "copy", "-map", "0", "-avoid_negative_ts", "make_zero"])
+        // Copy video + audio only; drop subtitle/data streams that MP4 can't hold
+        // (e.g. subrip in MKV would fail the mux).
+        .args(["-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-avoid_negative_ts", "make_zero"])
         .arg(output)
         .output()
         .map_err(|e| format!("ffmpeg failed to start: {e}"))?;
@@ -219,6 +221,8 @@ pub fn reformat(
         .arg("-i")
         .arg(input)
         .args(["-vf", &vf])
+        // Only the first video + first audio; ignore subtitles/data.
+        .args(["-map", "0:v:0", "-map", "0:a:0?"])
         .args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"])
         .args(["-c:a", "aac", "-b:a", "128k"])
         .args(["-movflags", "+faststart"])
@@ -290,7 +294,10 @@ pub fn normalize(
     }
 
     cmd.args(["-vf", &vf]);
-    if !audio {
+    if audio {
+        // First video + first audio only; drop subtitles/data.
+        cmd.args(["-map", "0:v:0", "-map", "0:a:0"]);
+    } else {
         cmd.args(["-map", "0:v:0", "-map", "1:a:0", "-shortest"]);
     }
     cmd.args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"])
