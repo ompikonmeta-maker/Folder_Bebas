@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Sidebar, type NavKey } from "./components/Sidebar";
 import { Workspace } from "./pages/Workspace";
+import { RenderQueue } from "./pages/RenderQueue";
 import { applyTheme, getInitialTheme, type Theme } from "./lib/theme";
 
 export default function App() {
@@ -21,7 +22,14 @@ export default function App() {
   return (
     <div className={"app" + (collapsed ? " collapsed" : "")}>
       <Sidebar active={nav} onNavigate={setNav} theme={theme} onToggleTheme={toggleTheme} />
-      <Workspace onToggleSidebar={() => setCollapsed((v) => !v)} />
+      {nav === "queue" ? (
+        <RenderQueue onToggleSidebar={() => setCollapsed((v) => !v)} />
+      ) : (
+        <Workspace
+          onToggleSidebar={() => setCollapsed((v) => !v)}
+          onGoToQueue={() => setNav("queue")}
+        />
+      )}
     </div>
   );
 }

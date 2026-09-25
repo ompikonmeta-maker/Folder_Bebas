@@ -50,6 +50,37 @@ pub struct LibraryAsset {
     pub created_at: String,
 }
 
+#[derive(Serialize, Clone)]
+pub struct ExportJob {
+    pub id: i64,
+    pub project_id: i64,
+    pub clip_id: Option<i64>,
+    pub platform_preset: String,
+    pub resolution: String,
+    pub combine: bool,
+    pub opener_id: Option<i64>,
+    pub ending_id: Option<i64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub status: String,
+    pub progress: i64,
+    pub output_path: Option<String>,
+    pub error: Option<String>,
+    pub created_at: String,
+}
+
+/// Parameters for enqueuing one export job.
+pub struct NewJob {
+    pub clip_id: i64,
+    pub platform_preset: String,
+    pub resolution: String,
+    pub combine: bool,
+    pub opener_id: Option<i64>,
+    pub ending_id: Option<i64>,
+    pub width: i64,
+    pub height: i64,
+}
+
 /// A clip to create — start/end in seconds. Used by both auto and manual modes.
 pub struct NewClip {
     pub source_id: i64,
@@ -118,13 +149,30 @@ impl Db {
                 platform_preset TEXT NOT NULL,
                 resolution      TEXT NOT NULL CHECK (resolution IN ('SD','HD','UHD')),
                 combine         INTEGER NOT NULL DEFAULT 0,
+                opener_id       INTEGER,
+                ending_id       INTEGER,
+                width           INTEGER,
+                height          INTEGER,
                 status          TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','running','done','error')),
                 progress        INTEGER NOT NULL DEFAULT 0,
                 output_path     TEXT,
+                error           TEXT,
                 created_at      TEXT NOT NULL DEFAULT (datetime('now'))
             );
             "#,
-        )
+        )?;
+        // Idempotent column adds for databases created before these columns
+        // existed. Duplicate-column errors are expected and ignored.
+        for col in [
+            "ALTER TABLE export_jobs ADD COLUMN opener_id INTEGER",
+            "ALTER TABLE export_jobs ADD COLUMN ending_id INTEGER",
+            "ALTER TABLE export_jobs ADD COLUMN width INTEGER",
+            "ALTER TABLE export_jobs ADD COLUMN height INTEGER",
+            "ALTER TABLE export_jobs ADD COLUMN error TEXT",
+        ] {
+            let _ = self.conn.execute(col, []);
+        }
+        Ok(())
     }
 
     pub fn list_projects(&self) -> rusqlite::Result<Vec<Project>> {
@@ -313,6 +361,91 @@ impl Db {
             name: r.get(2)?,
             file_path: r.get(3)?,
             created_at: r.get(4)?,
+        })
+    }
+
+    // ---- Export jobs ----
+
+    const JOB_COLS: &'static str = "id, project_id, clip_id, platform_preset, resolution, combine, \
+        opener_id, ending_id, width, height, status, progress, output_path, error, created_at";
+
+    pub fn insert_job(&self, project_id: i64, j: &NewJob) -> rusqlite::Result<ExportJob> {
+        self.conn.execute(
+            "INSERT INTO export_jobs
+             (project_id, clip_id, platform_preset, resolution, combine, opener_id, ending_id, width, height)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![
+                project_id, j.clip_id, j.platform_preset, j.resolution, j.combine as i64,
+                j.opener_id, j.ending_id, j.width, j.height
+            ],
+        )?;
+        self.get_job(self.conn.last_insert_rowid())
+    }
+
+    pub fn get_job(&self, id: i64) -> rusqlite::Result<ExportJob> {
+        let sql = format!("SELECT {} FROM export_jobs WHERE id = ?1", Self::JOB_COLS);
+        self.conn.query_row(&sql, [id], Self::map_job)
+    }
+
+    pub fn list_jobs(&self, project_id: i64) -> rusqlite::Result<Vec<ExportJob>> {
+        let sql = format!(
+            "SELECT {} FROM export_jobs WHERE project_id = ?1 ORDER BY id ASC",
+            Self::JOB_COLS
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map([project_id], Self::map_job)?;
+        rows.collect()
+    }
+
+    pub fn list_queued(&self, project_id: i64) -> rusqlite::Result<Vec<ExportJob>> {
+        let sql = format!(
+            "SELECT {} FROM export_jobs WHERE project_id = ?1 AND status = 'queued' ORDER BY id ASC",
+            Self::JOB_COLS
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map([project_id], Self::map_job)?;
+        rows.collect()
+    }
+
+    pub fn update_job(
+        &self,
+        id: i64,
+        status: &str,
+        progress: i64,
+        output_path: Option<&str>,
+        error: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE export_jobs SET status = ?2, progress = ?3, output_path = ?4, error = ?5 WHERE id = ?1",
+            rusqlite::params![id, status, progress, output_path, error],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_finished_jobs(&self, project_id: i64) -> rusqlite::Result<usize> {
+        self.conn.execute(
+            "DELETE FROM export_jobs WHERE project_id = ?1 AND status IN ('done','error')",
+            [project_id],
+        )
+    }
+
+    fn map_job(r: &rusqlite::Row) -> rusqlite::Result<ExportJob> {
+        Ok(ExportJob {
+            id: r.get(0)?,
+            project_id: r.get(1)?,
+            clip_id: r.get(2)?,
+            platform_preset: r.get(3)?,
+            resolution: r.get(4)?,
+            combine: r.get::<_, i64>(5)? != 0,
+            opener_id: r.get(6)?,
+            ending_id: r.get(7)?,
+            width: r.get(8)?,
+            height: r.get(9)?,
+            status: r.get(10)?,
+            progress: r.get(11)?,
+            output_path: r.get(12)?,
+            error: r.get(13)?,
+            created_at: r.get(14)?,
         })
     }
 }

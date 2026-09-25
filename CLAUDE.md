@@ -49,7 +49,10 @@ Two halves talk over Tauri's `invoke` bridge:
   `reformat_progress`, `combine_progress`); the frontend subscribes via the
   matching `on*Progress` helpers in `lib/api.ts`. Combine normalizes each part
   (opener/clip/ending) to a common shape — synthesizing silent audio when a
-  part has none — then concatenates with stream copy.
+  part has none — then concatenates with stream copy. Batch export goes through
+  the `export_jobs` table: `enqueue_exports` inserts queued rows, `run_queue`
+  processes them sequentially (combine or reformat per job), persisting status
+  and emitting `job_progress`; the `RenderQueue` page (nav "queue") drives it.
 
 ## Conventions
 

@@ -52,6 +52,10 @@ pub fn run() {
             commands::list_library,
             commands::delete_library_asset,
             commands::combine_clip,
+            commands::enqueue_exports,
+            commands::list_jobs,
+            commands::run_queue,
+            commands::clear_finished_jobs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

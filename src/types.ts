@@ -50,9 +50,14 @@ export interface ExportJob {
   platform_preset: string;
   resolution: Resolution;
   combine: boolean;
+  opener_id: number | null;
+  ending_id: number | null;
+  width: number | null;
+  height: number | null;
   status: JobStatus;
   progress: number; // 0..100
   output_path: string | null;
+  error: string | null;
   created_at: string;
 }
 

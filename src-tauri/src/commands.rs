@@ -1,6 +1,6 @@
 //! Tauri commands exposed to the React frontend (see src/lib/api.ts).
 
-use crate::db::{Clip, LibraryAsset, NewClip, Project, SourceVideo};
+use crate::db::{Clip, ExportJob, LibraryAsset, NewClip, NewJob, Project, SourceVideo};
 use crate::ffmpeg::{self, FfmpegStatus};
 use crate::AppState;
 use serde::Serialize;
@@ -294,25 +294,50 @@ pub fn combine_clip(
         (clip_path, opener_path, ending_path)
     };
 
-    // Ordered parts: opener, main, ending.
-    let mut sources: Vec<PathBuf> = Vec::new();
-    if let Some(p) = opener_path {
-        sources.push(PathBuf::from(p));
-    }
-    sources.push(PathBuf::from(&clip_path));
-    if let Some(p) = ending_path {
-        sources.push(PathBuf::from(p));
-    }
-
-    let exports_dir = state.storage_root.join("exports");
-    let tmp_dir = exports_dir.join(".tmp");
-    std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("mkdir tmp failed: {e}"))?;
-
-    // Normalize each part to a matching shape.
     let _ = app.emit(
         "combine_progress",
         CombineProgress { stage: "normalize".into(), clip_id, output: None },
     );
+    let out_str = combine_parts(
+        &state.storage_root,
+        clip_id,
+        &clip_path,
+        opener_path,
+        ending_path,
+        width,
+        height,
+    )?;
+    let _ = app.emit(
+        "combine_progress",
+        CombineProgress { stage: "done".into(), clip_id, output: Some(out_str.clone()) },
+    );
+    Ok(out_str)
+}
+
+/// Normalize [opener?] + clip + [ending?] to `width`×`height` and concat them
+/// into `exports/`. Temp parts are cleaned up. Returns the output path.
+fn combine_parts(
+    storage_root: &Path,
+    clip_id: i64,
+    clip_path: &str,
+    opener_path: Option<String>,
+    ending_path: Option<String>,
+    width: i64,
+    height: i64,
+) -> Result<String, String> {
+    let mut sources: Vec<PathBuf> = Vec::new();
+    if let Some(p) = opener_path {
+        sources.push(PathBuf::from(p));
+    }
+    sources.push(PathBuf::from(clip_path));
+    if let Some(p) = ending_path {
+        sources.push(PathBuf::from(p));
+    }
+
+    let exports_dir = storage_root.join("exports");
+    let tmp_dir = exports_dir.join(".tmp");
+    std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("mkdir tmp failed: {e}"))?;
+
     let mut normalized: Vec<PathBuf> = Vec::new();
     for (i, src) in sources.iter().enumerate() {
         let part = tmp_dir.join(format!("c{clip_id}_part{i}.mp4"));
@@ -320,12 +345,7 @@ pub fn combine_clip(
         normalized.push(part);
     }
 
-    // Concat.
-    let _ = app.emit(
-        "combine_progress",
-        CombineProgress { stage: "concat".into(), clip_id, output: None },
-    );
-    let stem = Path::new(&clip_path)
+    let stem = Path::new(clip_path)
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| format!("clip{clip_id}"));
@@ -333,19 +353,138 @@ pub fn combine_clip(
     let list = tmp_dir.join(format!("c{clip_id}_list.txt"));
     let result = ffmpeg::concat_copy(&normalized, &list, &out);
 
-    // Clean up temp files regardless of outcome.
     for p in &normalized {
         let _ = std::fs::remove_file(p);
     }
     let _ = std::fs::remove_file(&list);
     result?;
+    Ok(out.to_string_lossy().to_string())
+}
 
-    let out_str = out.to_string_lossy().to_string();
-    let _ = app.emit(
-        "combine_progress",
-        CombineProgress { stage: "done".into(), clip_id, output: Some(out_str.clone()) },
-    );
-    Ok(out_str)
+// ---- Export queue ----
+
+/// Enqueue one export job per clip with the given settings. Nothing runs yet.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn enqueue_exports(
+    state: State<AppState>,
+    project_id: i64,
+    clip_ids: Vec<i64>,
+    platform_preset: String,
+    resolution: String,
+    combine: bool,
+    opener_id: Option<i64>,
+    ending_id: Option<i64>,
+    width: i64,
+    height: i64,
+) -> Result<Vec<ExportJob>, String> {
+    let db = state.db.lock().map_err(map_err)?;
+    let mut jobs = Vec::new();
+    for clip_id in clip_ids {
+        let job = db
+            .insert_job(
+                project_id,
+                &NewJob {
+                    clip_id,
+                    platform_preset: platform_preset.clone(),
+                    resolution: resolution.clone(),
+                    combine,
+                    opener_id: if combine { opener_id } else { None },
+                    ending_id: if combine { ending_id } else { None },
+                    width,
+                    height,
+                },
+            )
+            .map_err(map_err)?;
+        jobs.push(job);
+    }
+    Ok(jobs)
+}
+
+#[tauri::command]
+pub fn list_jobs(state: State<AppState>, project_id: i64) -> Result<Vec<ExportJob>, String> {
+    let db = state.db.lock().map_err(map_err)?;
+    db.list_jobs(project_id).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn clear_finished_jobs(state: State<AppState>, project_id: i64) -> Result<usize, String> {
+    let db = state.db.lock().map_err(map_err)?;
+    db.delete_finished_jobs(project_id).map_err(map_err)
+}
+
+/// Run every queued job for the project, sequentially. Each job's status and
+/// output are persisted; a `job_progress` event carries the updated job after
+/// every transition. The db lock is released during ffmpeg work.
+#[tauri::command]
+pub fn run_queue(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    project_id: i64,
+) -> Result<(), String> {
+    let queued = {
+        let db = state.db.lock().map_err(map_err)?;
+        db.list_queued(project_id).map_err(map_err)?
+    };
+
+    for job in queued {
+        // Mark running.
+        {
+            let db = state.db.lock().map_err(map_err)?;
+            db.update_job(job.id, "running", 0, None, None).map_err(map_err)?;
+            if let Ok(j) = db.get_job(job.id) {
+                let _ = app.emit("job_progress", j);
+            }
+        }
+
+        let outcome = run_one_job(&state, &job);
+
+        let db = state.db.lock().map_err(map_err)?;
+        match outcome {
+            Ok(path) => db.update_job(job.id, "done", 100, Some(&path), None).map_err(map_err)?,
+            Err(e) => db.update_job(job.id, "error", 0, None, Some(&e)).map_err(map_err)?,
+        }
+        if let Ok(j) = db.get_job(job.id) {
+            let _ = app.emit("job_progress", j);
+        }
+    }
+    Ok(())
+}
+
+/// Produce the output file for one job: combine when requested, else reformat.
+fn run_one_job(state: &State<AppState>, job: &ExportJob) -> Result<String, String> {
+    let clip_id = job.clip_id.ok_or("job has no clip")?;
+    let width = job.width.ok_or("job has no width")?;
+    let height = job.height.ok_or("job has no height")?;
+
+    let (clip_path, opener_path, ending_path) = {
+        let db = state.db.lock().map_err(map_err)?;
+        let clip = db.get_clip(clip_id).map_err(map_err)?;
+        let clip_path = clip.file_path.ok_or("clip has no file on disk")?;
+        let opener = match job.opener_id {
+            Some(id) => Some(db.get_library_asset(id).map_err(map_err)?.file_path),
+            None => None,
+        };
+        let ending = match job.ending_id {
+            Some(id) => Some(db.get_library_asset(id).map_err(map_err)?.file_path),
+            None => None,
+        };
+        (clip_path, opener, ending)
+    };
+
+    if job.combine && (opener_path.is_some() || ending_path.is_some()) {
+        combine_parts(&state.storage_root, clip_id, &clip_path, opener_path, ending_path, width, height)
+    } else {
+        // Reformat only.
+        let exports_dir = state.storage_root.join("exports");
+        let stem = Path::new(&clip_path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| format!("clip{clip_id}"));
+        let out = unique_path(&exports_dir, &format!("{stem}_{width}x{height}.mp4"));
+        ffmpeg::reformat(&PathBuf::from(&clip_path), &out, width, height)?;
+        Ok(out.to_string_lossy().to_string())
+    }
 }
 
 /// Return a path in `dir` for `name`, appending _1, _2, … if it already exists.

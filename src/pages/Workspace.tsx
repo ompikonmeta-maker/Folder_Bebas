@@ -5,6 +5,7 @@ import { RESOLUTIONS, presetByKey, targetDims } from "../lib/presets";
 import {
   combineClip,
   deleteLibraryAsset,
+  enqueueExports,
   ffmpegStatus,
   generateClips,
   getStorageRoot,
@@ -32,9 +33,10 @@ function fmt(sec: number): string {
 
 interface Props {
   onToggleSidebar: () => void;
+  onGoToQueue: () => void;
 }
 
-export function Workspace({ onToggleSidebar }: Props) {
+export function Workspace({ onToggleSidebar, onGoToQueue }: Props) {
   const [preset, setPreset] = useState("yt_shorts");
   const [res, setRes] = useState("HD");
   const [storageRoot, setStorageRoot] = useState("…");
@@ -60,6 +62,8 @@ export function Workspace({ onToggleSidebar }: Props) {
   const [endingId, setEndingId] = useState<number | null>(null);
   const [combining, setCombining] = useState<Set<number>>(new Set());
   const [finals, setFinals] = useState<Record<number, string>>({});
+
+  const [combineOnExport, setCombineOnExport] = useState(true);
 
   const dims = useMemo(() => targetDims(preset, res), [preset, res]);
 
@@ -164,6 +168,30 @@ export function Workspace({ onToggleSidebar }: Props) {
         clipIds.forEach((id) => n.delete(id));
         return n;
       });
+    }
+  }
+
+  async function handleQueueExport() {
+    if (clips.length === 0) {
+      setError("Generate clips first.");
+      return;
+    }
+    setError(null);
+    try {
+      await enqueueExports({
+        projectId: PROJECT_ID,
+        clipIds: clips.map((c) => c.id),
+        platformPreset: preset,
+        resolution: res,
+        combine: combineOnExport,
+        openerId,
+        endingId,
+        width: dims.w,
+        height: dims.h,
+      });
+      onGoToQueue();
+    } catch (e) {
+      setError(String(e));
     }
   }
 
@@ -392,16 +420,31 @@ export function Workspace({ onToggleSidebar }: Props) {
           </button>
         </Card>
 
-        {/* 5 — Export (M5) */}
-        <Card step="⑤ Export" title="Output" index={4}>
+        {/* 5 — Export */}
+        <Card step="⑤ Export" title="Batch export" index={4}>
           <p>
-            Reformatted files land in exports/ at {res} ({dims.w}×{dims.h}). Batch
-            export with combine (opener + ending) arrives in M5.
+            Queue every clip at {presetByKey(preset).label} · {res} ({dims.w}×{dims.h}) into exports/.
           </p>
-          <div className="meta">
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={combineOnExport}
+              onChange={(e) => setCombineOnExport(e.target.checked)}
+            />
+            Include opener + ending
+          </label>
+          <div className="meta" style={{ marginTop: 10 }}>
             <span>✂ {Object.keys(outputs).length} reformatted</span>
             <span>▣ {Object.keys(finals).length} combined</span>
           </div>
+          <button
+            className="btn"
+            style={{ marginTop: 12 }}
+            disabled={clips.length === 0 || (!!ff && !ff.found)}
+            onClick={handleQueueExport}
+          >
+            Queue export ({clips.length}) →
+          </button>
         </Card>
       </div>
 

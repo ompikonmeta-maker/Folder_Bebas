@@ -1,7 +1,15 @@
 // Thin wrapper over Tauri commands (src-tauri/src/commands.rs).
 // Falls back to mock data when running in a plain browser (vite dev without Tauri),
 // so the UI is previewable without the Rust backend.
-import type { AssetKind, Clip, ClipMode, LibraryAsset, Project, SourceVideo } from "../types";
+import type {
+  AssetKind,
+  Clip,
+  ClipMode,
+  ExportJob,
+  LibraryAsset,
+  Project,
+  SourceVideo,
+} from "../types";
 
 type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -239,6 +247,95 @@ export async function onCombineProgress(cb: (p: CombineProgress) => void): Promi
   if (!isDesktop()) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
   return listen<CombineProgress>("combine_progress", (e) => cb(e.payload));
+}
+
+// ---- Export queue ----
+
+let mockJobs: ExportJob[] = [];
+
+export interface EnqueueArgs {
+  projectId: number;
+  clipIds: number[];
+  platformPreset: string;
+  resolution: string;
+  combine: boolean;
+  openerId?: number | null;
+  endingId?: number | null;
+  width: number;
+  height: number;
+}
+
+export async function enqueueExports(args: EnqueueArgs): Promise<ExportJob[]> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    const jobs = args.clipIds.map((cid, i) => ({
+      id: mockJobs.length + i + 1,
+      project_id: args.projectId,
+      clip_id: cid,
+      platform_preset: args.platformPreset,
+      resolution: args.resolution as ExportJob["resolution"],
+      combine: args.combine,
+      opener_id: args.combine ? args.openerId ?? null : null,
+      ending_id: args.combine ? args.endingId ?? null : null,
+      width: args.width,
+      height: args.height,
+      status: "queued" as const,
+      progress: 0,
+      output_path: null,
+      error: null,
+      created_at: new Date().toISOString(),
+    }));
+    mockJobs = [...mockJobs, ...jobs];
+    return jobs;
+  }
+  return invoke<ExportJob[]>("enqueue_exports", {
+    projectId: args.projectId,
+    clipIds: args.clipIds,
+    platformPreset: args.platformPreset,
+    resolution: args.resolution,
+    combine: args.combine,
+    openerId: args.openerId ?? null,
+    endingId: args.endingId ?? null,
+    width: args.width,
+    height: args.height,
+  });
+}
+
+export async function listJobs(projectId: number): Promise<ExportJob[]> {
+  const invoke = await getInvoke();
+  return invoke ? invoke<ExportJob[]>("list_jobs", { projectId }) : mockJobs;
+}
+
+export async function runQueue(projectId: number): Promise<void> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    // Browser preview: simulate sequential completion.
+    for (const j of mockJobs) {
+      if (j.status === "queued") {
+        j.status = "done";
+        j.progress = 100;
+        j.output_path = `(preview)/exports/clip_${j.clip_id}_${j.width}x${j.height}.mp4`;
+      }
+    }
+    return;
+  }
+  return invoke<void>("run_queue", { projectId });
+}
+
+export async function clearFinishedJobs(projectId: number): Promise<number> {
+  const invoke = await getInvoke();
+  if (!invoke) {
+    const before = mockJobs.length;
+    mockJobs = mockJobs.filter((j) => j.status !== "done" && j.status !== "error");
+    return before - mockJobs.length;
+  }
+  return invoke<number>("clear_finished_jobs", { projectId });
+}
+
+export async function onJobProgress(cb: (j: ExportJob) => void): Promise<() => void> {
+  if (!isDesktop()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<ExportJob>("job_progress", (e) => cb(e.payload));
 }
 
 export interface ClipProgress {
