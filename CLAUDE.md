@@ -20,10 +20,13 @@ npm run tauri:dev    # full desktop app (Vite + Rust)
 npm run tauri:build  # Windows installer / .exe
 ```
 
-- Rust check: `cd src-tauri && cargo check`. Requires Tauri system deps; on
-  Linux that means GTK/webkit dev libraries, so a Linux CI box without them
-  fails at the `gdk-sys` build step even when the code is correct — this is
-  expected, the real target is Windows.
+- Rust check: `cd src-tauri && cargo check`. Needs GTK/webkit dev libs on
+  Linux — install with `apt-get update && apt-get install -y libgtk-3-dev
+  libwebkit2gtk-4.1-dev libsoup-3.0-dev` (the `apt-get update` matters; stale
+  indexes 404). The real target is Windows.
+- FFmpeg: the app locates `ffmpeg`/`ffprobe` via `CLIPFORGE_FFMPEG_DIR`, then a
+  `binaries/` folder next to the exe, then PATH. Clipping is disabled in-UI when
+  neither is found.
 - No test runner is configured yet.
 
 ## Architecture
@@ -40,8 +43,10 @@ Two halves talk over Tauri's `invoke` bridge:
   central folder + SQLite on `setup`, and holds both in `AppState` (a `Mutex<Db>`
   plus the storage root). `storage.rs` creates/owns the central folder layout.
   `db.rs` owns the schema (idempotent migrate on every launch) and queries.
-  `commands.rs` exposes commands; register new ones in BOTH `commands.rs` and
-  the `generate_handler!` list in `lib.rs`.
+  `ffmpeg.rs` locates the binaries and runs probe/cut. `commands.rs` exposes
+  commands; register new ones in BOTH `commands.rs` and the `generate_handler!`
+  list in `lib.rs`. Long ffmpeg work emits a `clip_progress` event; the frontend
+  subscribes via `onClipProgress` in `lib/api.ts`.
 
 ## Conventions
 

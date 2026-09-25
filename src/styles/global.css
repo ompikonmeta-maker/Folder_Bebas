@@ -146,6 +146,47 @@ img { max-width: 100%; }
   border: 1px dashed var(--line);
 }
 
+/* ---- Banners ---- */
+.banner { border-radius: var(--r-md); padding: 12px 16px; margin-bottom: 18px; font-size: 13.5px; font-weight: 500; border: 1px solid transparent; }
+.banner code { background: rgba(0,0,0,.08); padding: 1px 6px; border-radius: 6px; }
+.banner.warn { background: color-mix(in srgb, var(--warn) 16%, var(--card)); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.banner.danger { background: color-mix(in srgb, var(--danger) 14%, var(--card)); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+
+/* ---- Segmented control ---- */
+.seg { display: flex; gap: 4px; background: var(--surface-2); padding: 4px; border-radius: var(--r-pill); margin-bottom: 14px; }
+.seg-btn { flex: 1; border: none; background: transparent; color: var(--ink-soft); font-weight: 600; font-size: 13px; padding: 8px; border-radius: var(--r-pill); cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
+.seg-btn.on { background: var(--card); color: var(--primary); box-shadow: var(--shadow-1); }
+
+/* ---- Fields / inputs ---- */
+.field { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); }
+input[type="number"] { font: inherit; padding: 9px 12px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--surface); color: var(--ink); width: 100%; }
+
+/* ---- Manual ranges ---- */
+.ranges { display: flex; flex-direction: column; gap: 8px; }
+.range-row { display: flex; align-items: center; gap: 8px; }
+.range-row input { flex: 1; }
+.mini { border: none; background: var(--surface-2); color: var(--ink-soft); width: 32px; height: 32px; border-radius: 10px; cursor: pointer; flex: none; }
+.mini:hover { color: var(--danger); }
+
+.hint-line { margin-top: 14px !important; font-size: 12.5px; color: var(--ink-faint); font-weight: 600; }
+
+/* ---- Progress bar ---- */
+.bar { height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin-top: 14px; }
+.bar > i { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--primary), var(--accent)); transition: width var(--dur) var(--ease); }
+
+.meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12.5px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+
+/* ---- Clips list ---- */
+.section-h { font-size: 18px; margin: 30px 0 14px; }
+.empty { color: var(--ink-faint); font-size: 13.5px; }
+.clip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.clip { display: flex; align-items: center; gap: 12px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px; box-shadow: var(--shadow-1); }
+.clip-thumb { width: 44px; height: 44px; flex: none; border-radius: 10px; display: grid; place-items: center; color: var(--accent-ink); background: color-mix(in srgb, var(--accent) 60%, var(--card)); }
+.clip b { display: block; font-size: 13px; font-weight: 700; }
+.clip small { color: var(--ink-soft); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+button:disabled { opacity: .5; cursor: not-allowed; }
+
 :focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 @media (prefers-reduced-motion: reduce) {

@@ -17,6 +17,39 @@ pub struct Project {
     pub platform_preset: String,
 }
 
+#[derive(Serialize)]
+pub struct SourceVideo {
+    pub id: i64,
+    pub project_id: i64,
+    pub file_path: String,
+    pub duration_sec: Option<f64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub fps: Option<f64>,
+    pub created_at: String,
+}
+
+#[derive(Serialize)]
+pub struct Clip {
+    pub id: i64,
+    pub project_id: i64,
+    pub source_id: i64,
+    pub mode: String,
+    pub start_sec: f64,
+    pub end_sec: f64,
+    pub file_path: Option<String>,
+    pub created_at: String,
+}
+
+/// A clip to create — start/end in seconds. Used by both auto and manual modes.
+pub struct NewClip {
+    pub source_id: i64,
+    pub mode: String,
+    pub start_sec: f64,
+    pub end_sec: f64,
+    pub file_path: String,
+}
+
 impl Db {
     pub fn open(path: &Path) -> rusqlite::Result<Self> {
         let conn = Connection::open(path)?;
@@ -119,5 +152,93 @@ impl Db {
                 })
             },
         )
+    }
+
+    // ---- Source videos ----
+
+    pub fn insert_source(
+        &self,
+        project_id: i64,
+        file_path: &str,
+        duration_sec: Option<f64>,
+        width: Option<i64>,
+        height: Option<i64>,
+        fps: Option<f64>,
+    ) -> rusqlite::Result<SourceVideo> {
+        self.conn.execute(
+            "INSERT INTO source_videos (project_id, file_path, duration_sec, width, height, fps)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![project_id, file_path, duration_sec, width, height, fps],
+        )?;
+        self.get_source(self.conn.last_insert_rowid())
+    }
+
+    pub fn get_source(&self, id: i64) -> rusqlite::Result<SourceVideo> {
+        self.conn.query_row(
+            "SELECT id, project_id, file_path, duration_sec, width, height, fps, created_at
+             FROM source_videos WHERE id = ?1",
+            [id],
+            Self::map_source,
+        )
+    }
+
+    pub fn list_sources(&self, project_id: i64) -> rusqlite::Result<Vec<SourceVideo>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, project_id, file_path, duration_sec, width, height, fps, created_at
+             FROM source_videos WHERE project_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map([project_id], Self::map_source)?;
+        rows.collect()
+    }
+
+    fn map_source(r: &rusqlite::Row) -> rusqlite::Result<SourceVideo> {
+        Ok(SourceVideo {
+            id: r.get(0)?,
+            project_id: r.get(1)?,
+            file_path: r.get(2)?,
+            duration_sec: r.get(3)?,
+            width: r.get(4)?,
+            height: r.get(5)?,
+            fps: r.get(6)?,
+            created_at: r.get(7)?,
+        })
+    }
+
+    // ---- Clips ----
+
+    pub fn insert_clip(&self, project_id: i64, c: &NewClip) -> rusqlite::Result<Clip> {
+        self.conn.execute(
+            "INSERT INTO clips (project_id, source_id, mode, start_sec, end_sec, file_path)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![project_id, c.source_id, c.mode, c.start_sec, c.end_sec, c.file_path],
+        )?;
+        self.conn.query_row(
+            "SELECT id, project_id, source_id, mode, start_sec, end_sec, file_path, created_at
+             FROM clips WHERE id = ?1",
+            [self.conn.last_insert_rowid()],
+            Self::map_clip,
+        )
+    }
+
+    pub fn list_clips(&self, project_id: i64) -> rusqlite::Result<Vec<Clip>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, project_id, source_id, mode, start_sec, end_sec, file_path, created_at
+             FROM clips WHERE project_id = ?1 ORDER BY start_sec ASC, id ASC",
+        )?;
+        let rows = stmt.query_map([project_id], Self::map_clip)?;
+        rows.collect()
+    }
+
+    fn map_clip(r: &rusqlite::Row) -> rusqlite::Result<Clip> {
+        Ok(Clip {
+            id: r.get(0)?,
+            project_id: r.get(1)?,
+            source_id: r.get(2)?,
+            mode: r.get(3)?,
+            start_sec: r.get(4)?,
+            end_sec: r.get(5)?,
+            file_path: r.get(6)?,
+            created_at: r.get(7)?,
+        })
     }
 }

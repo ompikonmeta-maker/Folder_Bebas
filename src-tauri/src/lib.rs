@@ -3,6 +3,7 @@
 
 mod commands;
 mod db;
+mod ffmpeg;
 mod storage;
 
 use db::Db;
@@ -39,8 +40,13 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_storage_root,
+            commands::ffmpeg_status,
             commands::list_projects,
             commands::create_project,
+            commands::import_source,
+            commands::list_sources,
+            commands::list_clips,
+            commands::generate_clips,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
