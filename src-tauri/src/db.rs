@@ -220,6 +220,15 @@ impl Db {
         )
     }
 
+    pub fn get_clip(&self, id: i64) -> rusqlite::Result<Clip> {
+        self.conn.query_row(
+            "SELECT id, project_id, source_id, mode, start_sec, end_sec, file_path, created_at
+             FROM clips WHERE id = ?1",
+            [id],
+            Self::map_clip,
+        )
+    }
+
     pub fn list_clips(&self, project_id: i64) -> rusqlite::Result<Vec<Clip>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, project_id, source_id, mode, start_sec, end_sec, file_path, created_at

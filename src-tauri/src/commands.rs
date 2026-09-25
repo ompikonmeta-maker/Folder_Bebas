@@ -166,6 +166,51 @@ pub fn generate_clips(
     Ok(created)
 }
 
+#[derive(Serialize, Clone)]
+struct ReformatProgress {
+    stage: String, // "start" | "done"
+    clip_id: i64,
+    output: Option<String>,
+}
+
+/// Reformat one clip to `width`×`height` (center-crop cover) and write it to
+/// `exports/`. Returns the output path. Dimensions come from the frontend
+/// (preset × resolution), keeping preset definitions in one place.
+#[tauri::command]
+pub fn reformat_clip(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    clip_id: i64,
+    width: i64,
+    height: i64,
+) -> Result<String, String> {
+    let input = {
+        let db = state.db.lock().map_err(map_err)?;
+        let clip = db.get_clip(clip_id).map_err(map_err)?;
+        clip.file_path.ok_or("clip has no file on disk")?
+    };
+    let input = PathBuf::from(input);
+    let stem = input
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| format!("clip{clip_id}"));
+
+    let exports_dir = state.storage_root.join("exports");
+    let out = unique_path(&exports_dir, &format!("{stem}_{width}x{height}.mp4"));
+
+    let _ = app.emit(
+        "reformat_progress",
+        ReformatProgress { stage: "start".into(), clip_id, output: None },
+    );
+    ffmpeg::reformat(&input, &out, width, height)?;
+    let out_str = out.to_string_lossy().to_string();
+    let _ = app.emit(
+        "reformat_progress",
+        ReformatProgress { stage: "done".into(), clip_id, output: Some(out_str.clone()) },
+    );
+    Ok(out_str)
+}
+
 /// Return a path in `dir` for `name`, appending _1, _2, … if it already exists.
 fn unique_path(dir: &Path, name: &str) -> PathBuf {
     let candidate = dir.join(name);

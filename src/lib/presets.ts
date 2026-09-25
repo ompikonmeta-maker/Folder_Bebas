@@ -18,3 +18,18 @@ export const RESOLUTIONS = [
 export function presetByKey(key: string): PlatformPreset {
   return PRESETS.find((p) => p.key === key) ?? PRESETS[0];
 }
+
+export type ResolutionKey = (typeof RESOLUTIONS)[number]["key"];
+
+/**
+ * Output dimensions for a preset at a given resolution. Presets are defined at
+ * the HD baseline (short side = 1080); we scale by (shortSide / 1080) and round
+ * to even numbers, which H.264 requires.
+ */
+export function targetDims(presetKey: string, resKey: string): { w: number; h: number } {
+  const p = presetByKey(presetKey);
+  const res = RESOLUTIONS.find((r) => r.key === resKey) ?? RESOLUTIONS[1];
+  const factor = res.scale / 1080;
+  const even = (n: number) => Math.max(2, Math.round((n * factor) / 2) * 2);
+  return { w: even(p.width), h: even(p.height) };
+}

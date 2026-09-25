@@ -146,6 +146,28 @@ export async function generateClips(args: GenerateClipsArgs): Promise<Clip[]> {
   });
 }
 
+// ---- Reformat ----
+
+/** Reformat a clip to width×height (center-crop). Returns the output file path. */
+export async function reformatClip(clipId: number, width: number, height: number): Promise<string> {
+  const invoke = await getInvoke();
+  if (!invoke) return `(preview)/export_${width}x${height}.mp4`;
+  return invoke<string>("reformat_clip", { clipId, width, height });
+}
+
+export interface ReformatProgress {
+  stage: "start" | "done";
+  clip_id: number;
+  output: string | null;
+}
+
+/** Subscribe to reformat progress. Returns an unlisten fn (no-op in browser). */
+export async function onReformatProgress(cb: (p: ReformatProgress) => void): Promise<() => void> {
+  if (!isDesktop()) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<ReformatProgress>("reformat_progress", (e) => cb(e.payload));
+}
+
 export interface ClipProgress {
   done: number;
   total: number;

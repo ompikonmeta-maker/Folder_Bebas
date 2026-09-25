@@ -165,6 +165,33 @@ pub fn cut_segment(input: &Path, output: &Path, start_sec: f64, end_sec: f64) ->
     Ok(())
 }
 
+/// Reformat a clip to `w`×`h` using center-crop "cover": scale so the frame is
+/// fully covered, then crop the overflow from the center. Re-encodes to H.264/AAC.
+pub fn reformat(input: &Path, output: &Path, w: i64, h: i64) -> Result<(), String> {
+    let vf = format!(
+        "scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},setsar=1"
+    );
+    let out = Command::new(ffmpeg_bin())
+        .args(["-hide_banner", "-loglevel", "error", "-y"])
+        .arg("-i")
+        .arg(input)
+        .args(["-vf", &vf])
+        .args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"])
+        .args(["-c:a", "aac", "-b:a", "128k"])
+        .args(["-movflags", "+faststart"])
+        .arg(output)
+        .output()
+        .map_err(|e| format!("ffmpeg failed to start: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "ffmpeg reformat exited with {}: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
+}
+
 /// Compute equal-length [start, end] windows covering `total` seconds.
 pub fn auto_windows(total: f64, seg: f64) -> Vec<(f64, f64)> {
     let mut out = Vec::new();

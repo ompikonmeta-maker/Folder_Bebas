@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Dropdown } from "../components/Dropdown";
 import { Card } from "../components/Card";
-import { RESOLUTIONS } from "../lib/presets";
+import { RESOLUTIONS, presetByKey, targetDims } from "../lib/presets";
 import {
   ffmpegStatus,
   generateClips,
@@ -11,6 +11,7 @@ import {
   listSources,
   onClipProgress,
   pickAndImport,
+  reformatClip,
   type ClipProgress,
   type FfmpegStatus,
 } from "../lib/api";
@@ -45,6 +46,11 @@ export function Workspace({ onToggleSidebar }: Props) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<ClipProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [formatting, setFormatting] = useState<Set<number>>(new Set());
+  const [outputs, setOutputs] = useState<Record<number, string>>({});
+
+  const dims = useMemo(() => targetDims(preset, res), [preset, res]);
 
   useEffect(() => {
     getStorageRoot().then(setStorageRoot).catch(() => setStorageRoot("(unavailable)"));
@@ -93,6 +99,29 @@ export function Workspace({ onToggleSidebar }: Props) {
       setError(String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleReformat(clipIds: number[]) {
+    if (clipIds.length === 0) {
+      setError("Generate clips first.");
+      return;
+    }
+    setError(null);
+    setFormatting((s) => new Set([...s, ...clipIds]));
+    try {
+      for (const id of clipIds) {
+        const out = await reformatClip(id, dims.w, dims.h);
+        setOutputs((o) => ({ ...o, [id]: out }));
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setFormatting((s) => {
+        const n = new Set(s);
+        clipIds.forEach((id) => n.delete(id));
+        return n;
+      });
     }
   }
 
@@ -235,12 +264,36 @@ export function Workspace({ onToggleSidebar }: Props) {
           )}
         </Card>
 
-        {/* 3 — Reformat (M3) */}
+        {/* 3 — Reformat */}
         <Card step="③ Reformat" title="Portrait crop" index={2}>
-          <p>Landscape → portrait via center-crop, following the preset above. (M3)</p>
-          <div className="thumb" style={{ aspectRatio: "9/16", maxHeight: 150, marginInline: "auto" }}>
-            9:16 preview
+          <p>
+            Center-crop to {presetByKey(preset).label} ({presetByKey(preset).ratio}).
+          </p>
+          <div className="chips">
+            {RESOLUTIONS.map((r) => (
+              <span key={r.key} className={"chip" + (res === r.key ? " on" : "")} onClick={() => setRes(r.key)}>
+                {r.label}
+              </span>
+            ))}
           </div>
+          <div
+            className="thumb"
+            style={{
+              aspectRatio: `${dims.w}/${dims.h}`,
+              maxHeight: 150,
+              marginInline: "auto",
+            }}
+          >
+            {dims.w}×{dims.h}
+          </div>
+          <button
+            className="btn"
+            style={{ marginTop: 14 }}
+            disabled={clips.length === 0 || (!!ff && !ff.found) || formatting.size > 0}
+            onClick={() => handleReformat(clips.map((c) => c.id))}
+          >
+            {formatting.size > 0 ? `Formatting ${formatting.size}…` : `Format all ${clips.length} clips →`}
+          </button>
         </Card>
 
         {/* 4 — Combine (M4) */}
@@ -253,14 +306,14 @@ export function Workspace({ onToggleSidebar }: Props) {
         </Card>
 
         {/* 5 — Export (M5) */}
-        <Card step="⑤ Export" title="Resolution" index={4}>
-          <p>Render upload-ready files into exports/. (M5)</p>
-          <div className="chips">
-            {RESOLUTIONS.map((r) => (
-              <span key={r.key} className={"chip" + (res === r.key ? " on" : "")} onClick={() => setRes(r.key)}>
-                {r.label}
-              </span>
-            ))}
+        <Card step="⑤ Export" title="Output" index={4}>
+          <p>
+            Reformatted files land in exports/ at {res} ({dims.w}×{dims.h}). Batch
+            export with combine (opener + ending) arrives in M5.
+          </p>
+          <div className="meta">
+            <span>✓ {Object.keys(outputs).length} exported</span>
+            <span>◷ {clips.length - Object.keys(outputs).length} pending</span>
           </div>
         </Card>
       </div>
@@ -271,17 +324,30 @@ export function Workspace({ onToggleSidebar }: Props) {
         <p className="empty">No clips yet. Import a video and generate.</p>
       ) : (
         <div className="clip-grid">
-          {clips.map((c) => (
-            <div className="clip" key={c.id}>
-              <div className="clip-thumb">▶</div>
-              <div>
-                <b>{c.file_path?.split(/[\\/]/).pop() ?? `clip ${c.id}`}</b>
-                <small>
-                  {fmt(c.start_sec)}–{fmt(c.end_sec)} · {fmt(c.end_sec - c.start_sec)} · {c.mode}
-                </small>
+          {clips.map((c) => {
+            const isFormatting = formatting.has(c.id);
+            const out = outputs[c.id];
+            return (
+              <div className="clip" key={c.id}>
+                <div className="clip-thumb">▶</div>
+                <div className="clip-body">
+                  <b>{c.file_path?.split(/[\\/]/).pop() ?? `clip ${c.id}`}</b>
+                  <small>
+                    {fmt(c.start_sec)}–{fmt(c.end_sec)} · {fmt(c.end_sec - c.start_sec)} · {c.mode}
+                  </small>
+                  {out && <small className="ok">✓ {out.split(/[\\/]/).pop()}</small>}
+                </div>
+                <button
+                  className="mini format"
+                  title={`Reformat to ${dims.w}×${dims.h}`}
+                  disabled={isFormatting || (!!ff && !ff.found)}
+                  onClick={() => handleReformat([c.id])}
+                >
+                  {isFormatting ? "…" : out ? "↻" : "⤓"}
+                </button>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </section>
